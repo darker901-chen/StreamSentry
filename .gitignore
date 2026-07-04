@@ -16,6 +16,16 @@
 !LICENSE
 !README.md
 
+# Project governance and workflow files (this project)
+!CLAUDE.md
+!SPEC.md
+!SETUP.md
+!TESTING.md
+!CHANGELOG.md
+!/.claude
+!/scripts
+!/reports
+
 # Exclude lock files
 *.lock.json
 
