@@ -27,8 +27,13 @@ Sources: `reports/M0-verifier.md` (VERDICT: VERIFIED) and
 - SHA256 of the built DLL and of `data/locale/en-US.ini` match the deployed
   copies under `D:\software\obs\obs-studio`.
 
-### Manual acceptance procedure — STATUS: PENDING
-Nobody has run this yet. M0 is not complete until a human performs it.
+### Manual acceptance procedure — STATUS: PASSED (2026-07-05)
+Project owner visually confirmed "obsplugin" in the Effect Filters "+" list
+(zh-TW UI, screenshot provided in session). Step 4 log evidence was captured
+the same day: `[obsplugin] plugin loaded successfully (version 0.1.0)` and
+`obsplugin.dll` under "Loaded Modules" in log `2026-07-05 02-20-39.txt`.
+Known cosmetic note: `Failed to load 'zh-TW' text for module: 'obsplugin.dll'`
+— zh-TW locale file deferred to M1; en-US fallback shows the same name.
 
 1. Start OBS Studio: `D:\software\obs\obs-studio\bin\64bit\obs64.exe`.
 2. Right-click any video source (e.g. Display Capture) → Filters → under
