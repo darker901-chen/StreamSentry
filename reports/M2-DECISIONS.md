@@ -1,6 +1,10 @@
 # M2 design decisions & a flagged CLAUDE.md/SPEC.md conflict
 
-## FLAGGED CONFLICT — blocklist matching semantics (needs human ruling)
+## RESOLVED (owner ruling 2026-07-05): blocklist stays process-OR-title.
+The project owner ruled: keep the OR semantics as implemented. No code
+change. This decision is final for v0.1; reviewers should not re-flag it.
+
+## FLAGGED CONFLICT — blocklist matching semantics (RULED: OR, see above)
 
 - **CLAUDE.md (Architecture)** says the enumeration signature for *both*
   toasts *and* blocklist is "**process name AND window class**, both must

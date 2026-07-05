@@ -58,11 +58,8 @@ then add the **StreamSentry** filter to it. Turn **Do Not Disturb OFF**
        **2-hour** run: if you want the full guarantee, leave OBS running
        with the filter for 2h and confirm the working set does not climb.
 
-## Decision awaiting your ruling (reports/M2-DECISIONS.md)
-10. [ ] **Blocklist match semantics.** Implemented as process-name **OR**
-        title-substring (SPEC wording + iron rule 1 "never under-mask").
-        CLAUDE.md's literal "process AND class" was kept for toasts only.
-        Confirm OR-semantics for the blocklist is what you want, or ask
-        for strict AND (less safe — can miss a sensitive window).
+## Decision — RESOLVED (owner ruling 2026-07-05)
+10. [x] **Blocklist match semantics.** RULED: keep process-name **OR**
+        title-substring (as implemented). No change. Done.
 
 When done, switch scene collection back to "無標題".
