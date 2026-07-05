@@ -33,7 +33,8 @@ Project owner visually confirmed "obsplugin" in the Effect Filters "+" list
 the same day: `[obsplugin] plugin loaded successfully (version 0.1.0)` and
 `obsplugin.dll` under "Loaded Modules" in log `2026-07-05 02-20-39.txt`.
 Known cosmetic note: `Failed to load 'zh-TW' text for module: 'obsplugin.dll'`
-— zh-TW locale file deferred to M1; en-US fallback shows the same name.
+— harmless; localization is out of scope for v0.1 per SPEC.md, en-US fallback
+shows the same name.
 
 1. Start OBS Studio: `D:\software\obs\obs-studio\bin\64bit\obs64.exe`.
 2. Right-click any video source (e.g. Display Capture) → Filters → under

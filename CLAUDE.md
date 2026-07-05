@@ -9,7 +9,7 @@ A Windows OBS Studio video filter plugin — "accident insurance for screen capt
 3. **Masking is opaque — never blur, never pixelate/mosaic.** Reversible obfuscation is forbidden (archived clips can be attacked offline). Two styles: (a) notification-shaped placeholder card (rounded rect, bell icon, "Notification hidden") for toast rects; (b) privacy plate (dark fill + lock icon + "Hidden") for window/field rects. Raw black is reserved solely for the fail-closed state.
 4. **No third-party dependencies** beyond what obs-plugintemplate provides. Windows SDK (UIA, COM) and libobs only.
 5. **Scope is locked to v0.1** (see SPEC.md). Do not implement backlog items (macOS, notifications, blur options, per-app policy, tray icon, auto-update) even if they seem easy.
-6. **License is GPLv2.** All code written here is original, written against OBS APIs and Windows SDK documentation only. Never import or adapt code from any other private project.
+6. **License is GPLv2.** Specifically GPL-2.0-or-later, matching OBS Studio and obs-plugintemplate convention (decided 2026-07-05). All code written here is original, written against OBS APIs and Windows SDK documentation only. Never import or adapt code from any other private project.
 
 ## Architecture (fixed)
 - One watcher thread (COM MTA) owns all detection: Win32 window enumeration on a 100–200ms timer for toasts + blocklist (signature = **process name AND window class**, both must match; check DWMWA_CLOAKED for UWP windows), plus UIA focus-changed events for password fields only. Event handlers do minimal work: copy rects, post to shared state, return.
