@@ -5,6 +5,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+This Unreleased set (milestones M0 through M4 below) constitutes release
+candidate **0.1.0** — ship-ready but not yet published. Publishing and tagging
+are a human step (see `reports/FINAL.md`); nothing here has been pushed or
+tagged.
+
+- **M4 (docs + packaging, no code logic):** README rewritten to the full
+  shipping structure (problem, deterministic/no-AI, fail-closed, opaque-not-blur,
+  install, usage, limitations, roadmap, GPL-2.0-or-later); release-zip packaging
+  dry-run verified (`streamsentry-0.1.0-windows-x64.zip` layout:
+  `streamsentry/bin/64bit/` + `streamsentry/data/`); `reports/FINAL.md` written
+  as the consolidated evidence + human-checklist + publish-steps index. Verified
+  by `reports/M4-verifier.md` (VERDICT: VERIFIED) and
+  `reports/M4-spec-guardian.md` (RESULT: PASS).
+
 ### 0.1.0-m3 - 2026-07-05
 
 Milestone M3: the settings UI plus hardening (performance measurement, a

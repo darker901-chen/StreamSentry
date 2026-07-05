@@ -302,6 +302,50 @@ full 2-hour soak — all tracked in `reports/HUMAN_CHECKLIST.md` and PENDING abo
 
 ---
 
+## M4 — 2026-07-05 — Ship-ready (docs + packaging)
+
+M4 changed no code logic — it is the final documentation and release-packaging
+pass. The shipping DLL is unchanged; only README.md and the `reports/` were
+touched (plus the packaging dry-run under the git-ignored `release/`).
+
+### Automated evidence
+Sources: `reports/M4-verifier.md` (VERDICT: VERIFIED, 7/7 checks) and
+`reports/M4-spec-guardian.md` (RESULT: PASS), both 2026-07-05.
+- CI-parity build with warnings-as-errors
+  (`CMAKE_COMPILE_WARNING_AS_ERROR=ON`): a forced clean full recompile of every
+  translation unit exited 0 with zero warning/error lines.
+- ctest 2/2 pure suites passed (`coord-map-tests`, `plate-gen-tests`), and
+  `watcher-selftest.exe` exited 0 (blocklist rect appear/disappear, heartbeat
+  freeze >500 ms / resume, clean start/stop; toast line INCONCLUSIVE under
+  machine Do Not Disturb — accepted).
+- Shipping-DLL hygiene: `streamsentry.dll` has performance instrumentation
+  compiled out (no `PERF watcher tick` string) and `dumpbin /dependents` shows
+  libobs + Windows COM/DWM/pthreads + the C++ runtime only — no Qt, no
+  third-party dependency.
+- Release-zip layout verified via install dry-run:
+  `streamsentry-0.1.0-windows-x64.zip` contains exactly
+  `streamsentry/bin/64bit/streamsentry.dll` (+ `.pdb`) and
+  `streamsentry/data/locale/en-US.ini`, matching the README download
+  instructions; `release/` is git-ignored and absent from `git status`.
+- README honesty (`reports/M4-spec-guardian.md`): PASS — no overclaims, and all
+  v0.1 limitations are disclosed.
+
+`reports/FINAL.md` is the consolidated index — machine-verified evidence, the
+remaining human checklist, and the exact human publish/tag steps — and
+`reports/HUMAN_CHECKLIST.md` holds the remaining manual pass.
+
+### Manual acceptance (overall v0.1) — STATUS: PENDING
+The v0.1 manual acceptance is not yet done. It still requires the human pass in
+`reports/HUMAN_CHECKLIST.md` (on-screen plate/card opacity; real toast masking
+with Do Not Disturb OFF; live password-field and blocklist-app masking;
+coordinate accuracy on a real second monitor / different DPI and a
+scaled/cropped source), the optional full 2-hour endurance soak (only 30 min was
+measured, in M3), and the owner's ruling on the blocklist match-semantics
+decision (process-name-OR-title-substring vs CLAUDE.md's literal "process AND
+class"; `reports/M2-DECISIONS.md`).
+
+---
+
 ## Post-M0 — 2026-07-05 — Renamed obsplugin → StreamSentry
 
 No behavior change; identity-only rename (see CHANGELOG.md for the full
