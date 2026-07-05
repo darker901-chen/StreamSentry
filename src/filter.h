@@ -16,25 +16,16 @@ You should have received a copy of the GNU General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
+#pragma once
+
 #include <obs-module.h>
-#include <plugin-support.h>
 
-#include "filter.h"
-#include "shared-state.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-OBS_DECLARE_MODULE()
-OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
+extern struct obs_source_info streamsentry_filter_info;
 
-bool obs_module_load(void)
-{
-	ss_state_init();
-	obs_register_source(&streamsentry_filter_info);
-	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
-	return true;
+#ifdef __cplusplus
 }
-
-void obs_module_unload(void)
-{
-	ss_state_free();
-	obs_log(LOG_INFO, "plugin unloaded");
-}
+#endif

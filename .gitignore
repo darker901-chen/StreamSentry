@@ -25,6 +25,7 @@
 !/.claude
 !/scripts
 !/reports
+!/tests
 
 # Exclude lock files
 *.lock.json

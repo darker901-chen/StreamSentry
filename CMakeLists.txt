@@ -34,6 +34,29 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c)
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE
+    src/plugin-main.c
+    src/filter.c
+    src/filter.h
+    src/coord-map.c
+    src/coord-map.h
+    src/plate-gen.c
+    src/plate-gen.h
+    src/shared-state.c
+    src/shared-state.h
+)
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+
+# Unit tests for the pure modules (no libobs dependency); ctest runs
+# them locally during verification.
+option(STREAMSENTRY_BUILD_TESTS "Build StreamSentry unit tests" ON)
+if(STREAMSENTRY_BUILD_TESTS)
+  enable_testing()
+  add_executable(coord-map-tests tests/coord-map-tests.c src/coord-map.c)
+  add_executable(plate-gen-tests tests/plate-gen-tests.c src/plate-gen.c)
+  add_test(NAME coord-map-tests COMMAND coord-map-tests)
+  add_test(NAME plate-gen-tests COMMAND plate-gen-tests)
+endif()
