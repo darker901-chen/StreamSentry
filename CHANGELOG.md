@@ -5,6 +5,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### 0.1.0-m3 - 2026-07-05
+
+Milestone M3: the settings UI plus hardening (performance measurement, a
+30-minute soak, and an acceptance-matrix mapping). No new detection or masking
+behavior. Verified by `reports/M3-verifier.md` (VERDICT: VERIFIED) and
+`reports/M3-spec-guardian.md` (RESULT: PASS).
+
+#### Added
+- Settings UI (`src/filter.c`): the SPEC "minimal" settings — exactly two
+  properties. An **Enable** checkbox (`enabled`, default true) and a multi-line
+  **Blocklist** text box (`blocklist`, `OBS_TEXT_MULTILINE`, one process name or
+  window-title substring per line), pre-filled with the built-in defaults via
+  `ss_watcher_default_blocklist_text()`. There is deliberately **no** option to
+  disable fail-closed. Empty text falls back to the built-in defaults.
+- Optional performance instrumentation behind the CMake option
+  `STREAMSENTRY_PERF_LOG` (`option(... OFF)`, default OFF). When ON it logs the
+  watcher tick cost and the render-decision cost; it is compiled out of the
+  shipping build (the currently-configured build has `STREAMSENTRY_PERF_LOG=OFF`
+  and neither `PERF watcher tick` nor `PERF render decision` string is present in
+  the shipping DLL, per M3-verifier Check 2).
+
+#### Changed
+- `src/filter.c`: the `blocklist` text is read in `filter_update` and pushed to
+  the shared watcher via `ss_watcher_set_blocklist()`. Because there is one
+  shared watcher thread, the blocklist is **global** to that thread — each filter
+  instance has its own textbox and the last update wins (last-writer-wins). This
+  is a documented v0.1 interpretation of the single-watcher architecture
+  (inline comment in `filter_update`; surfaced to the human in
+  `reports/HUMAN_CHECKLIST.md` item 10).
+- `data/locale/en-US.ini`: removed the M2 `DebugGroup` / `DebugKill` strings;
+  added `Blocklist` and `BlocklistHint`.
+
+#### Removed
+- The developer debug scaffolding is gone from the shipping UI: the M2 developer
+  property group and its `debug_kill` "freeze watcher heartbeat" toggle were
+  removed from `filter_get_properties`, `filter_get_defaults`, `filter_update`,
+  and the `ss_filter` struct. The underlying fault-injection hook
+  `ss_watcher_debug_set_killed` (`src/watcher.cpp`) still exists but is wired to
+  **no** OBS setting — its only caller is `tests/watcher-selftest.cpp`. Because no
+  shipping translation unit references it, the linker's `/OPT:REF` drops the
+  unreferenced function and its log string from the release DLL (the DEBUG-kill
+  log string is absent from `streamsentry.dll` yet present in
+  `watcher-selftest.exe`, per M3-verifier Check 4).
+
+#### Dependencies
+- Unchanged from M2. `dumpbin /DEPENDENTS` on both the built and deployed DLL
+  returns the identical import set (`obs.dll`, `dwmapi.dll`, `ole32.dll`,
+  `USER32.dll`, `w32-pthreads.dll`, `KERNEL32.dll`, `MSVCP140.dll`,
+  `VCRUNTIME140_1.dll`, `VCRUNTIME140.dll`, `api-ms-win-crt-*`). No Qt, no
+  third-party library. The perf instrumentation uses only `os_gettime_ns` and
+  `obs_log` (both already present pre-M3); CMakeLists.txt adds only an `option()`
+  plus a `target_compile_definitions` on the existing target.
+
+#### Hardening / performance
+Measured on a separate `STREAMSENTRY_PERF_LOG=ON` build (numbers from
+`reports/M3-perf.md`, raw soak data in `reports/M3-soak-samples.csv`):
+- Watcher thread: ~0.55% of one core (samples 0.803–0.826 ms/tick at the 150 ms
+  cadence) — under the SPEC `< 1% of one core` target.
+- Render decision cost: avg 0.03 µs/frame (~30 ns), ~0.0002% of a 60 fps
+  16 667 µs budget. GPU draw submission is excluded (that is libobs). No
+  measurable frame-drop risk.
+- 30-minute soak: stable working set with no leak indicators — 345 MB at
+  startup, trimmed to ~320–321 MB by ~160 s and flat for the remaining 27 min
+  (max 321.1); private bytes ~356.5 MB flat; handles and threads in narrow bands
+  (6351–6382 / 234–242) with no monotonic growth. SPEC's endurance target is a
+  **2-hour** run; this was 30 min, so the full 2-hour confirmation remains a
+  human-checklist item (`reports/HUMAN_CHECKLIST.md` item 9).
+
 ### 0.1.0-m2 - 2026-07-05
 
 Milestone M2: real OS-level detection replaces M1's hardcoded fake rects. A

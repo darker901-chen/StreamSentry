@@ -58,6 +58,14 @@ if(WIN32)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE dwmapi ole32 oleaut32 uuid user32)
 endif()
 
+# Optional performance instrumentation (watcher tick cost + render decision
+# cost logged periodically). OFF for release builds; turned ON only to
+# capture the M3 perf/soak numbers.
+option(STREAMSENTRY_PERF_LOG "Log watcher/render performance samples" OFF)
+if(STREAMSENTRY_PERF_LOG)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE STREAMSENTRY_PERF_LOG)
+endif()
+
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
 
 # Unit tests for the pure modules (no libobs dependency); ctest runs

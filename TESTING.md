@@ -214,6 +214,94 @@ self-test plus the in-OBS logs above.
 
 ---
 
+## M3 — 2026-07-05 — Settings UI + hardening
+
+### What was built
+- Settings UI (`src/filter.c`): the SPEC "minimal" settings — an **Enable**
+  checkbox and a multi-line **Blocklist** text box (one process name or
+  window-title substring per line), pre-filled with the built-in defaults via
+  `ss_watcher_default_blocklist_text()`. Deliberately **no** option to disable
+  fail-closed.
+- The blocklist is global to the single shared watcher thread (per-filter
+  textbox, last-writer-wins) — a documented v0.1 interpretation.
+- Removed the developer debug scaffolding (the `debug_kill` "freeze watcher
+  heartbeat" toggle) from the shipping UI. The underlying
+  `ss_watcher_debug_set_killed` hook remains for the standalone self-test only,
+  wired to no setting, and is dropped from the release DLL by `/OPT:REF`.
+- Optional performance instrumentation behind the CMake option
+  `STREAMSENTRY_PERF_LOG` (OFF by default, compiled out of the shipping build).
+
+### Automated evidence
+Sources: `reports/M3-verifier.md` (VERDICT: VERIFIED) and
+`reports/M3-spec-guardian.md` (RESULT: PASS), both 2026-07-05.
+- Build green: `cmake --build --preset windows-x64-local` exited 0 with no
+  warnings in the incremental build tail.
+- ctest 2/2 pure suites passed: `coord-map-tests` and `plate-gen-tests`
+  (`ctest --test-dir build_x64 -C RelWithDebInfo --output-on-failure`, exit 0).
+- Watcher self-test (`watcher-selftest.exe`) exited 0: thread started; heartbeat
+  advanced; a blocklist rect appeared after notepad opened and disappeared after
+  it closed; the heartbeat froze >500 ms under fault injection (render fails
+  closed) and resumed after release; clean shutdown. The toast line was
+  INCONCLUSIVE (machine Do Not Disturb) — accepted.
+- Perf compiled OUT of the shipping DLL: `CMakeCache.txt` has
+  `STREAMSENTRY_PERF_LOG=OFF`; neither `PERF watcher tick` nor
+  `PERF render decision` is present in `streamsentry.dll`. The built and deployed
+  DLL share SHA256 `9835ca172898c46672e7eb9e08e7953be107696797a93a26584b5c998ef0cf12`,
+  matching the pinned value.
+- Dependencies unchanged vs M2 and no Qt: `dumpbin /DEPENDENTS` on both the built
+  and deployed DLL returns the identical import set (`obs.dll`, `dwmapi.dll`,
+  `ole32.dll`, `USER32.dll`, `w32-pthreads.dll`, `KERNEL32.dll`, `MSVCP140.dll`,
+  `VCRUNTIME140_1.dll`, `VCRUNTIME140.dll`, `api-ms-win-crt-*`).
+- Performance and soak (`reports/M3-perf.md`, raw data
+  `reports/M3-soak-samples.csv`, from a separate `STREAMSENTRY_PERF_LOG=ON`
+  build): watcher tick ~0.55% of one core (0.803–0.826 ms/tick at 150 ms cadence)
+  under the SPEC `< 1% of one core` target; render decision avg 0.03 µs/frame
+  (~30 ns); 30-minute soak stable with no leak indicators (working set 345 MB at
+  startup, ~320–321 MB flat for the remaining 27 min; private bytes ~356.5 MB
+  flat; handles 6351–6382 and threads 234–242 with no monotonic growth).
+- Acceptance matrix (`reports/M3-acceptance-matrix.md`): all 10 SPEC acceptance
+  rows are mapped to evidence; rows 7 (fault injection) and 10 (empty
+  blocklist / no password field → pass-through) are fully machine-verified. The
+  remaining rows are classified MECHANISM / UNIT / HUMAN with the longer SPEC
+  targets (2-hour soak) routed to the human checklist.
+
+### Manual acceptance — STATUS: PENDING
+The on-screen / real-device confirmations are in `reports/HUMAN_CHECKLIST.md`;
+steps are not duplicated here. Carried items still outstanding:
+- Settings-UI visual check: the Enable checkbox and the Blocklist textbox
+  pre-filled with the defaults render as expected in the OBS properties dialog,
+  and editing a line takes effect (checklist item 1). OBS was not launched during
+  M3 verification.
+- Real toast masking (needs Do Not Disturb OFF), password-field masking, and
+  blocklist-window masking on real detected windows (items 2–5).
+- Coordinate accuracy on real multi-monitor / mixed-DPI / scaled captures
+  (items 6, 7).
+- The full 2-hour soak — only a 30-minute soak was measured this session
+  (item 9).
+- The still-open blocklist-semantics decision: process-name-OR-title-substring
+  (as implemented) vs CLAUDE.md's literal "process AND class", awaiting the
+  owner's ruling (item 10; `reports/M2-DECISIONS.md`).
+
+### Not covered by automation
+Per `reports/M3-verifier.md`: real on-screen toast masking (DND-blocked here),
+end-to-end UIA password-field masking, credential-dialog / UAC (secure desktop,
+not capturable), live multi-monitor / mixed-DPI / scaled-source landing accuracy,
+the visual "no dropped frames" during recording, the full 2-hour soak, and the
+in-OBS rendering of the settings dialog were not machine-verified this session
+(OBS was not launched). `src/filter.c`'s render/settings wiring has no unit test;
+the perf/soak numbers are read from a separate `STREAMSENTRY_PERF_LOG=ON` build
+and were not re-run this session.
+
+### Manual in-OBS test matrix from SPEC.md — still outstanding
+The full SPEC acceptance matrix is mapped in `reports/M3-acceptance-matrix.md`.
+Machine-verified: rows 7 and 10. The human's ~10-minute eyeball pass must still
+cover the settings UI as rendered, real toast / password-field / blocklist-window
+masking and plate opacity on screen, coordinate accuracy on real
+multi-monitor / DPI / scaled captures, the live fail-closed blackout, and the
+full 2-hour soak — all tracked in `reports/HUMAN_CHECKLIST.md` and PENDING above.
+
+---
+
 ## Post-M0 — 2026-07-05 — Renamed obsplugin → StreamSentry
 
 No behavior change; identity-only rename (see CHANGELOG.md for the full

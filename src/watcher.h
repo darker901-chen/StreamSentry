@@ -42,6 +42,10 @@ void ss_watcher_stop(void);
  * Thread-safe. */
 void ss_watcher_set_blocklist(const char *multiline_utf8);
 
+/* The built-in default blocklist as newline-separated UTF-8 text, for
+ * pre-filling the settings box. Points to static storage. */
+const char *ss_watcher_default_blocklist_text(void);
+
 /* M2 fault-injection hook (developer-only, for the fail-closed test):
  * when killed, the watcher loop stops publishing AND stops updating the
  * heartbeat, exactly as a dead thread would look to the render side,

@@ -314,9 +314,29 @@ DWORD WINAPI watcher_thread(LPVOID)
 	EnumCtx ctx;
 	ctx.rects.reserve(SS_MAX_RECTS);
 
+#ifdef STREAMSENTRY_PERF_LOG
+	uint64_t perf_accum = 0, perf_samples = 0;
+#endif
+
 	for (;;) {
 		if (InterlockedCompareExchange(&g_killed, 0, 0) == 0) {
+#ifdef STREAMSENTRY_PERF_LOG
+			uint64_t t0 = os_gettime_ns();
+#endif
 			publish_tick(ctx);
+#ifdef STREAMSENTRY_PERF_LOG
+			perf_accum += os_gettime_ns() - t0;
+			if (++perf_samples >= 200) {
+				double avg_ms = (double)perf_accum / (double)perf_samples / 1e6;
+				obs_log(LOG_INFO,
+					"PERF watcher tick: avg %.3f ms/tick over %llu ticks "
+					"(~%.2f%% of one core at %lums cadence)",
+					avg_ms, (unsigned long long)perf_samples,
+					avg_ms / (double)WATCH_TICK_MS * 100.0, (unsigned long)WATCH_TICK_MS);
+				perf_accum = 0;
+				perf_samples = 0;
+			}
+#endif
 		}
 		/* When killed we intentionally neither publish nor beat the
 		 * heartbeat, so the render side fails closed within 500ms. */
@@ -429,6 +449,25 @@ void ss_watcher_set_blocklist(const char *multiline_utf8)
 	if (g_blocklist.empty())
 		for (const wchar_t *e : DEFAULT_BLOCKLIST)
 			g_blocklist.push_back(e);
+}
+
+const char *ss_watcher_default_blocklist_text(void)
+{
+	/* Newline-joined DEFAULT_BLOCKLIST, built once. */
+	static std::string text;
+	if (text.empty()) {
+		for (const wchar_t *e : DEFAULT_BLOCKLIST) {
+			std::wstring w(e);
+			int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+			if (n > 1) {
+				std::string s(n - 1, '\0');
+				WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], n, nullptr, nullptr);
+				text += s;
+				text += '\n';
+			}
+		}
+	}
+	return text.c_str();
 }
 
 void ss_watcher_debug_set_killed(bool killed)

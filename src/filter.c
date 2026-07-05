@@ -60,7 +60,6 @@ struct ss_filter {
 
 	/* settings */
 	bool enabled;
-	bool debug_kill; /* developer-only fault injection; removed at M3 */
 
 	/* last successfully read snapshot */
 	struct ss_snapshot snap;
@@ -75,6 +74,11 @@ struct ss_filter {
 	/* state-transition logging (no per-frame spam) */
 	enum ss_render_mode last_mode;
 	size_t last_plate_count;
+
+#ifdef STREAMSENTRY_PERF_LOG
+	uint64_t perf_accum_ns;
+	uint64_t perf_samples;
+#endif
 };
 
 static const char *filter_get_name(void *unused)
@@ -88,11 +92,11 @@ static void filter_update(void *data, obs_data_t *settings)
 	struct ss_filter *f = data;
 	f->enabled = obs_data_get_bool(settings, "enabled");
 
-	bool kill = obs_data_get_bool(settings, "debug_kill");
-	if (kill != f->debug_kill) {
-		f->debug_kill = kill;
-		ss_watcher_debug_set_killed(kill);
-	}
+	/* The watcher is a single shared thread, so the blocklist is global:
+	 * with multiple StreamSentry filters the most-recently-updated one
+	 * wins (documented). Empty text falls back to the built-in defaults. */
+	const char *blocklist = obs_data_get_string(settings, "blocklist");
+	ss_watcher_set_blocklist(blocklist);
 }
 
 static void *filter_create(obs_data_t *settings, obs_source_t *source)
@@ -124,10 +128,6 @@ static void free_textures(struct ss_filter *f)
 static void filter_destroy(void *data)
 {
 	struct ss_filter *f = data;
-	/* Ensure a fault-injecting instance doesn't leave the shared watcher
-	 * killed for other instances / next run. */
-	if (f->debug_kill)
-		ss_watcher_debug_set_killed(false);
 	free_textures(f);
 	ss_watcher_stop();
 	bfree(f);
@@ -140,19 +140,19 @@ static obs_properties_t *filter_get_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 	obs_properties_add_bool(props, "enabled", obs_module_text("Enable"));
 
-	/* Developer-only fault injection, removed at M3. It can only FREEZE
-	 * the watcher heartbeat (forcing fail-closed) — there is no toggle
-	 * that can weaken or disable the black-out. */
-	obs_properties_t *dev = obs_properties_create();
-	obs_properties_add_bool(dev, "debug_kill", obs_module_text("DebugKill"));
-	obs_properties_add_group(props, "developer", obs_module_text("DebugGroup"), OBS_GROUP_NORMAL, dev);
+	/* Blocklist: one process name or window-title substring per line
+	 * (SPEC settings UI). There is deliberately NO option to disable the
+	 * fail-closed behavior. */
+	obs_property_t *bl =
+		obs_properties_add_text(props, "blocklist", obs_module_text("Blocklist"), OBS_TEXT_MULTILINE);
+	obs_property_set_long_description(bl, obs_module_text("BlocklistHint"));
 	return props;
 }
 
 static void filter_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, "enabled", true);
-	obs_data_set_default_bool(settings, "debug_kill", false);
+	obs_data_set_default_string(settings, "blocklist", ss_watcher_default_blocklist_text());
 }
 
 /* ---- drawing helpers ------------------------------------------------ */
@@ -330,6 +330,22 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 			}
 		}
 	}
+
+#ifdef STREAMSENTRY_PERF_LOG
+	/* Per-frame CPU decision cost (state read + heartbeat + geometry +
+	 * mapping) — the work StreamSentry adds that would not exist without
+	 * it. GPU draw submission is excluded (it is libobs, not us).
+	 * Compiled out of release builds. */
+	f->perf_accum_ns += os_gettime_ns() - now;
+	f->perf_samples++;
+	if (f->perf_samples >= 600) {
+		obs_log(LOG_INFO, "PERF render decision: avg %.2f us/frame over %llu frames",
+			(double)f->perf_accum_ns / (double)f->perf_samples / 1000.0,
+			(unsigned long long)f->perf_samples);
+		f->perf_accum_ns = 0;
+		f->perf_samples = 0;
+	}
+#endif
 
 	if (unhealthy) {
 		draw_fail_closed(f, w, h);
