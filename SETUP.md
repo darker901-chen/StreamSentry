@@ -76,6 +76,57 @@
 骨架在 OBS 裡亮起來 → 回 Claude.ai 找我拿 M1(render path:假 rect 驅動 plate +
 fail-closed 路徑)的 prompt。別讓 Claude Code 自行往下衝功能(CLAUDE.md 第 5 條會擋)。
 
+## 換一台機器開發前,先知道這三個落差
+bootstrap.ps1 裝好 Git / CMake / VS Build Tools / OBS 是必要條件,但不是充分
+條件。這台機器實際跑下來踩到三個模板沒講、換機器大機率會再踩到的坑:
+
+1. **Windows SDK 版本被官方 preset 釘死,新機器十之八九對不上。**
+   `CMakePresets.json` 的 `windows-x64` preset 寫死
+   `architecture: "x64,version=10.0.22621"`。VS Build Tools 現在裝的 SDK
+   通常是更新版本(這台機器是 10.0.26100),configure 會因為找不到那個
+   確切版本而失敗。
+   **解法**:建一個「不進版控」的 `CMakeUserPresets.json`(此檔名沒有專屬
+   規則,只是單純落在 `.gitignore` 開頭 `/*` 這條全擋規則內,跟其他未列入
+   白名單的檔案一樣被排除),繼承 `windows-x64` 但不鎖 SDK 版本:
+   ```json
+   {
+     "version": 8,
+     "configurePresets": [{
+       "name": "windows-x64-local",
+       "inherits": ["windows-x64"],
+       "architecture": "x64"
+     }],
+     "buildPresets": [{
+       "name": "windows-x64-local",
+       "configurePreset": "windows-x64-local"
+     }]
+   }
+   ```
+   之後全程用 `--preset windows-x64-local` 取代 `windows-x64`。**CI 不受
+   影響**——GitHub Actions 的 Windows runner image 有官方 preset 指定的
+   SDK,照 `windows-ci-x64` 原樣跑就會過。
+
+2. **OBS 安裝路徑不是固定的。**
+   bootstrap.ps1 只檢查 `%ProgramFiles%\obs-studio`;如果目標機器已經裝在
+   別的路徑(這台機器裝在 `D:\software\obs\obs-studio`),腳本會誤判成
+   「沒裝」而想再裝一次。部署 plugin 前務必先實際確認 `obs64.exe` 在哪,
+   例如:
+   ```powershell
+   (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+     Where-Object DisplayName -like '*OBS Studio*').DisplayIcon
+   ```
+   別直接照抄 TESTING.md 裡寫的路徑,那是這台機器的個別路徑,不是通用路徑。
+
+3. **(較少見)全域 git 設定可能擋掉 GitHub HTTPS 操作。**
+   如果 `git config --global --get-regexp 'url\..*\.insteadof'` 有結果,
+   而且指向的 SSH 身分檔案不存在,對 `https://github.com/...` 的任何操作
+   都會報 `no such identity` 或 `Permission denied (publickey)`,即使你
+   用的明明是 https 網址。不想動全域設定的話,可以在單一 repo 內用更長
+   前綴覆寫掉它(git 規則以最長前綴優先):
+   ```powershell
+   git config url."https://github.com/<你的帳號>/".insteadOf "https://github.com/<你的帳號>/"
+   ```
+
 ## 常見狀況
 - **bootstrap 報找不到 winget**:裝 App Installer(見上面第 2 點)後重跑。
 - **裝完 VS 後 cmake 找不到編譯器**:關掉 PowerShell 開新的,環境變數才更新;
