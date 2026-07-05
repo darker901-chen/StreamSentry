@@ -53,3 +53,36 @@ M0 completion definition: the human has seen the filter in OBS's filter list.
 The manual in-OBS test matrix from SPEC.md (toast masking, blocklist windows,
 password-field guard, fail-closed blackout) covers behavior that does not
 exist yet; it applies from M1 onward.
+
+---
+
+## Post-M0 — 2026-07-05 — Renamed obsplugin → StreamSentry
+
+No behavior change; identity-only rename (see CHANGELOG.md for the full
+list of renamed identifiers). Re-verified directly (not re-run through the
+verifier/spec-guardian agents — no logic changed, so the M0 gate evidence
+still applies to the code paths themselves):
+- Rebuilt clean (deleted `build_x64`, reconfigured, rebuilt) since
+  `buildspec.json` is not a tracked CMake configure dependency and a stale
+  cache would have kept producing `obsplugin.dll`.
+- `dumpbin /dependents` on the new `streamsentry.dll`: still libobs-only
+  (`obs.dll` + VCRUNTIME/api-ms-win-crt*/KERNEL32), no Qt.
+- Old deployed artifacts (`obsplugin.dll`/`.pdb`,
+  `data\obs-plugins\obsplugin\`) removed from
+  `D:\software\obs\obs-studio`; new ones deployed under the `streamsentry`
+  name.
+- OBS log confirms `[streamsentry] plugin loaded successfully (version
+  0.1.0)`; no `obsplugin` references remain in the log.
+
+### Manual re-confirmation — STATUS: PENDING
+The filter's on-screen name changed (was "obsplugin", now "StreamSentry").
+Ask the owner for one more glance: Filters → Effect Filters "+" → confirm
+the entry now reads **StreamSentry**.
+
+### Directory note
+`F:\obsplugin` (this repo's original path) could not be renamed or removed
+from within the Claude Code session that performed this change — it is
+that session's protected primary working directory. A verified full mirror
+(git history, working tree, `.deps`) was made via `robocopy` to
+`F:\StreamSentry`. Treat `F:\StreamSentry` as canonical going forward;
+`F:\obsplugin` can be deleted manually once confirmed redundant.
