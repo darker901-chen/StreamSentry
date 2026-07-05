@@ -1,0 +1,38 @@
+StreamSentry M2 — in-OBS integration evidence (2026-07-05)
+
+Two OBS runs, scene collection "StreamSentryM2" (color source + filter),
+confirming the real C++/COM MTA watcher loads and runs inside OBS's
+process and drives the render-side fail-closed correctly.
+
+===== RUN A — healthy watcher (debug_kill = false) =====
+17:29:50.408: [streamsentry] plugin loaded successfully (version 0.1.0)
+17:29:50.457:     - filter: 'StreamSentry' (streamsentry_filter)
+17:29:50.463: [streamsentry] FAIL-CLOSED engaged: heartbeat stale (age huge)
+17:29:50.552: [streamsentry] watcher thread started (tick 150ms)
+17:29:50.603: [streamsentry] fail-closed cleared: normal rendering resumed
+17:29:57.399: [streamsentry] watcher thread stopped
+17:29:57.473: [streamsentry] plugin unloaded
+
+Interpretation: the filter starts FAIL-CLOSED by default (no confirmed
+heartbeat yet -> black, the safe state), the watcher thread starts ~140ms
+later, and once its heartbeat is fresh the render clears to normal
+pass-through. Clean watcher shutdown on unload. This "black until
+detection is proven alive" startup is exactly iron rule 1.
+
+===== RUN B — fault-injected watcher (debug_kill = true) =====
+17:30:02.400: [streamsentry] plugin loaded successfully (version 0.1.0)
+17:30:02.443: [streamsentry] watcher: DEBUG kill engaged (heartbeat frozen)
+17:30:02.454: [streamsentry] FAIL-CLOSED engaged: heartbeat stale
+17:30:02.542: [streamsentry] watcher thread started (tick 150ms)
+17:30:09.457: [streamsentry] watcher: DEBUG kill released
+17:30:09.460: [streamsentry] watcher thread stopped
+
+Interpretation: with the watcher heartbeat frozen, the render stays
+FAIL-CLOSED for the whole run (no "cleared" line) — a dead/stalled
+watcher keeps the output black. Kill is released and the thread joins
+cleanly on unload.
+
+Together with reports/M2-watcher-selftest-output.txt (real blocklist
+detection + heartbeat-freeze) and the M1 render evidence (stale
+heartbeat -> black within ~500ms), this shows the full chain: real
+watcher -> heartbeat -> render health -> fail-closed.

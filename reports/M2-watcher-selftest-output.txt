@@ -1,0 +1,19 @@
+﻿StreamSentry watcher-selftest — run 2026-07-05
+exit code: 0
+
+ok:   watcher thread started
+watcher thread started (tick 150ms)
+ok:   heartbeat advances while watcher alive
+info: baseline blocklist rects = 0
+ok:   launched notepad.exe
+ok:   blocklist rect appeared after notepad opened
+ok:   blocklist rect disappeared after notepad closed
+watcher: DEBUG kill engaged (heartbeat frozen)
+ok:   heartbeat frozen while killed (>500ms) -> render fails closed
+watcher: DEBUG kill released
+ok:   heartbeat resumes after un-kill
+INCONCLUSIVE: no toast banner detected (likely Do Not Disturb / focus assist suppressing the banner) - see reports/M2-DECISIONS.md; real toast masking is on the human checklist
+watcher thread stopped
+ok:   watcher thread stopped cleanly
+watcher-selftest: all deterministic checks passed
+

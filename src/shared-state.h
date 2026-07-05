@@ -19,10 +19,12 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 /* Shared state between the watcher (writer) and the render callback
  * (reader). Per the fixed architecture: rect list + heartbeat
  * timestamp; the render-side critical section is non-blocking (trylock)
- * and tiny (memcpy of a fixed-size snapshot).
+ * and tiny (a copy of a fixed-size snapshot).
  *
- * M1: a fake provider in the filter's video_tick plays the watcher's
- * role. M2 replaces it with the real COM MTA watcher thread. */
+ * The watcher produces SCREEN-space rects only; it cannot know which OBS
+ * source/monitor the filter is attached to. The filter resolves its own
+ * capture geometry each frame and maps these screen rects into source
+ * space (see geom-resolve + coord-map). */
 
 #pragma once
 
@@ -47,12 +49,10 @@ struct ss_shared_rect {
 	struct ss_rect screen; /* virtual-screen physical pixels */
 };
 
-#define SS_MAX_RECTS 32
+#define SS_MAX_RECTS 64
 
 struct ss_snapshot {
-	uint64_t heartbeat_ns;  /* os_gettime_ns() at last watcher tick */
-	bool geometry_valid;    /* capture geometry resolved successfully */
-	struct ss_capture_geom geom;
+	uint64_t heartbeat_ns; /* os_gettime_ns() at last watcher tick */
 	size_t num_rects;
 	struct ss_shared_rect rects[SS_MAX_RECTS];
 };
@@ -60,10 +60,10 @@ struct ss_snapshot {
 void ss_state_init(void);
 void ss_state_free(void);
 
-/* Writer side (watcher / M1 fake provider). Blocking lock, brief. */
+/* Writer side (watcher). Blocking lock, brief. */
 void ss_state_publish(const struct ss_snapshot *snap);
 
-/* Update only the heartbeat, keeping rects/geometry as-is. */
+/* Update only the heartbeat, keeping rects as-is. */
 void ss_state_touch_heartbeat(uint64_t now_ns);
 
 /* Reader side (render callback). Never blocks: on lock contention

@@ -5,6 +5,88 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### 0.1.0-m2 - 2026-07-05
+
+Milestone M2: real OS-level detection replaces M1's hardcoded fake rects. A
+COM MTA watcher thread enumerates windows and reports real screen-space rects,
+which the filter maps through the M1 coordinate module. Verified by
+`reports/M2-verifier.md` (VERDICT: VERIFIED) and `reports/M2-spec-guardian.md`
+(RESULT: PASS).
+
+#### Added
+- Detection watcher (`src/watcher.cpp`): one COM MTA thread
+  (`CoInitializeEx(nullptr, COINIT_MULTITHREADED)`), refcounted so multiple
+  filter instances share the single thread. It enumerates windows on a 150 ms
+  timer (`WATCH_TICK_MS`) and publishes screen-space rects plus a heartbeat
+  timestamp into shared state each live tick.
+- Toast detection: matches on process name AND window class. The signature was
+  determined empirically on this machine as `explorer.exe` +
+  `Xaml_WindowedPopupClass` (Windows 11 build 26200); this supersedes SPEC's
+  Win10-era `ShellExperienceHost` example, and the determination is recorded in
+  code comments. Candidates are gated by DWMWA_CLOAKED (cloaked skipped), plus
+  visible and non-empty rect. The class also matches other XAML flyouts (Start
+  search, taskbar popups), which are therefore over-masked — accepted under
+  iron rule 1 and documented as a known limitation.
+- Blocklist detection: matches when the process image name OR the window-title
+  substring matches an entry (both case-insensitive). Built-in defaults are
+  password managers and credential dialogs (1Password, KeePass, Bitwarden,
+  Dashlane, LastPass, `consent.exe`, `logonui`, `credentialuibroker`). Wiring a
+  user-editable blocklist textbox is deferred to M3; the running plugin uses the
+  built-in defaults (`ss_watcher_set_blocklist` exists and is exercised by the
+  self-test but is not yet wired to filter settings).
+- Password-field detection: a UIA focus-changed handler reads
+  `UIA_IsPasswordProperty` and, on a password element, copies
+  `BoundingRectangle` under a small lock and returns. The handler does minimal
+  work (no enumeration, no blocking); enumeration runs on the timer.
+- Filter-side capture-geometry resolution (`src/geom-resolve.c`): resolves
+  geometry only for display/monitor capture, and only when unambiguous — exactly
+  one monitor whose native pixel size equals the source base size. Any other
+  source id, a zero base size, zero monitors, or more than one same-size monitor
+  returns false and the caller fails closed. It does not trust an OBS monitor
+  index/id, because a same-resolution neighbour would give the wrong origin
+  (under-mask). Dual identical-resolution monitors are a documented v0.1
+  limitation.
+
+#### Changed
+- `src/filter.c`: rewired to map the watcher's real rects through the M1
+  coordinate module instead of injecting fake rects. Startup is fail-closed
+  (black) until the watcher's first heartbeat proves detection is alive
+  (observed in OBS as FAIL-CLOSED at load, then cleared ~140 ms later once the
+  heartbeat was fresh). M1's fake-rect / simulate-stall DEBUG toggles were
+  replaced by a single `debug_kill` toggle that freezes the watcher heartbeat to
+  force fail-closed; it feeds no path that can weaken or disable the blackout,
+  and `filter_destroy` releases a lingering kill so a fault-injecting instance
+  cannot leave the shared watcher frozen for others.
+- `src/shared-state.h`: slimmed for M2 — the geometry fields were removed; the
+  watcher emits screen-space rects only and the filter resolves its own capture
+  geometry per frame.
+- `data/locale/en-US.ini`: removed the M1 `DebugRects` / `DebugStall` strings;
+  added a single `DebugKill` = "DEBUG: freeze watcher heartbeat (forces
+  fail-closed blackout)".
+- `CMakeLists.txt`: added `src/watcher.cpp`, `src/geom-resolve.c`, and the new
+  headers to the module target, and a `watcher-selftest` executable
+  (`tests/watcher-selftest.cpp`, intentionally not registered with ctest because
+  it has side effects).
+
+#### Dependencies
+- New Windows SDK link/import libraries: `dwmapi` (DWMWA_CLOAKED), `ole32`
+  (COM init/create), `oleaut32`, `uuid` (static GUIDs), and `user32`
+  (`EnumWindows` / window-class and title queries). `dwmapi.dll`, `ole32.dll`,
+  and `USER32.dll` appear as new runtime imports (`oleaut32`/`uuid` link but do
+  not add runtime imports).
+- The MSVC C++ runtime (`MSVCP140.dll`, `VCRUNTIME140_1.dll`) is now imported,
+  introduced by `watcher.cpp` using the C++ standard library
+  (`std::mutex`/`vector`/`wstring`). No third-party libraries, no Qt.
+
+#### Decisions
+- Blocklist matching uses process-name-OR-title-substring (per SPEC Detection §2
+  and iron rule 1's over-mask requirement); CLAUDE.md's "process AND class" is
+  applied to toasts only. Requiring both process AND an exact class for the
+  blocklist would AND two failure modes and make a miss (under-mask) more likely,
+  which iron rule 1 forbids. This is documented in `reports/M2-DECISIONS.md` and
+  flagged for the owner's ruling (see `reports/HUMAN_CHECKLIST.md`); it is a
+  one-line change if strict AND-semantics are mandated instead.
+
 ### 0.1.0-m1 - 2026-07-05
 
 Milestone M1: mask-render pipeline driven by hardcoded fake rects (real

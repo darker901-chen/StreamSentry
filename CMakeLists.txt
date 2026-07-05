@@ -46,7 +46,17 @@ target_sources(
     src/plate-gen.h
     src/shared-state.c
     src/shared-state.h
+    src/geom-resolve.c
+    src/geom-resolve.h
+    src/watcher.cpp
+    src/watcher.h
 )
+
+# Windows detection stack: DWM (cloaked check), COM/UIA (password fields),
+# Win32 window enumeration + process query. libobs already pulls user32.
+if(WIN32)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE dwmapi ole32 oleaut32 uuid user32)
+endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
 
@@ -59,4 +69,24 @@ if(STREAMSENTRY_BUILD_TESTS)
   add_executable(plate-gen-tests tests/plate-gen-tests.c src/plate-gen.c)
   add_test(NAME coord-map-tests COMMAND coord-map-tests)
   add_test(NAME plate-gen-tests COMMAND plate-gen-tests)
+
+  # Watcher self-test: exercises the real COM MTA watcher thread + Win32
+  # enumeration + blocklist matching, stubbing the two libobs symbols the
+  # watcher references (obs_log, os_gettime_ns) so no obs.dll is needed.
+  # NOT registered with add_test(): it launches notepad and fires a toast,
+  # so it is run explicitly for M2 evidence, not in the pure ctest sweep.
+  if(WIN32)
+    add_executable(watcher-selftest tests/watcher-selftest.cpp src/watcher.cpp src/shared-state.c)
+    target_include_directories(
+      watcher-selftest
+      PRIVATE src "$<TARGET_PROPERTY:OBS::libobs,INTERFACE_INCLUDE_DIRECTORIES>"
+    )
+    target_link_libraries(watcher-selftest PRIVATE OBS::w32-pthreads dwmapi ole32 oleaut32 uuid user32)
+    add_custom_command(
+      TARGET watcher-selftest
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:OBS::w32-pthreads>"
+              "$<TARGET_FILE_DIR:watcher-selftest>"
+    )
+  endif()
 endif()

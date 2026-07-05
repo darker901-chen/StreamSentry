@@ -27,6 +27,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "coord-map.h"
 #include "plate-gen.h"
 #include "shared-state.h"
+#include "geom-resolve.h"
+#include "watcher.h"
 
 /* Fail-closed threshold (SPEC.md): heartbeat older than 500ms means the
  * detection side cannot be trusted; the entire output goes black. This
@@ -58,9 +60,7 @@ struct ss_filter {
 
 	/* settings */
 	bool enabled;
-	bool debug_rects;     /* M1 scaffolding: publish fake rects */
-	bool debug_stall;     /* M1 scaffolding: freeze heartbeat -> fail-closed */
-	bool stall_published; /* one snapshot emitted before stalling */
+	bool debug_kill; /* developer-only fault injection; removed at M3 */
 
 	/* last successfully read snapshot */
 	struct ss_snapshot snap;
@@ -87,11 +87,12 @@ static void filter_update(void *data, obs_data_t *settings)
 {
 	struct ss_filter *f = data;
 	f->enabled = obs_data_get_bool(settings, "enabled");
-	f->debug_rects = obs_data_get_bool(settings, "debug_rects");
-	bool stall = obs_data_get_bool(settings, "debug_stall");
-	if (!stall)
-		f->stall_published = false;
-	f->debug_stall = stall;
+
+	bool kill = obs_data_get_bool(settings, "debug_kill");
+	if (kill != f->debug_kill) {
+		f->debug_kill = kill;
+		ss_watcher_debug_set_killed(kill);
+	}
 }
 
 static void *filter_create(obs_data_t *settings, obs_source_t *source)
@@ -99,6 +100,7 @@ static void *filter_create(obs_data_t *settings, obs_source_t *source)
 	struct ss_filter *f = bzalloc(sizeof(struct ss_filter));
 	f->source = source;
 	f->last_mode = SS_MODE_INIT;
+	ss_watcher_start();
 	filter_update(f, settings);
 	return f;
 }
@@ -122,7 +124,12 @@ static void free_textures(struct ss_filter *f)
 static void filter_destroy(void *data)
 {
 	struct ss_filter *f = data;
+	/* Ensure a fault-injecting instance doesn't leave the shared watcher
+	 * killed for other instances / next run. */
+	if (f->debug_kill)
+		ss_watcher_debug_set_killed(false);
 	free_textures(f);
+	ss_watcher_stop();
 	bfree(f);
 }
 
@@ -133,11 +140,11 @@ static obs_properties_t *filter_get_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 	obs_properties_add_bool(props, "enabled", obs_module_text("Enable"));
 
-	/* M1 scaffolding, removed at M3: these can only exercise the mask
-	 * and fail-closed paths, never weaken them. */
+	/* Developer-only fault injection, removed at M3. It can only FREEZE
+	 * the watcher heartbeat (forcing fail-closed) — there is no toggle
+	 * that can weaken or disable the black-out. */
 	obs_properties_t *dev = obs_properties_create();
-	obs_properties_add_bool(dev, "debug_rects", obs_module_text("DebugRects"));
-	obs_properties_add_bool(dev, "debug_stall", obs_module_text("DebugStall"));
+	obs_properties_add_bool(dev, "debug_kill", obs_module_text("DebugKill"));
 	obs_properties_add_group(props, "developer", obs_module_text("DebugGroup"), OBS_GROUP_NORMAL, dev);
 	return props;
 }
@@ -145,78 +152,7 @@ static obs_properties_t *filter_get_properties(void *data)
 static void filter_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, "enabled", true);
-	obs_data_set_default_bool(settings, "debug_rects", false);
-	obs_data_set_default_bool(settings, "debug_stall", false);
-}
-
-static void publish_fake_snapshot(struct ss_filter *f, uint64_t now, uint32_t base_w, uint32_t base_h)
-{
-	struct ss_snapshot snap;
-	memset(&snap, 0, sizeof(snap));
-	snap.heartbeat_ns = now;
-	snap.geometry_valid = true;
-	snap.geom.screen_region.x = 0.0;
-	snap.geom.screen_region.y = 0.0;
-	snap.geom.screen_region.w = (double)base_w;
-	snap.geom.screen_region.h = (double)base_h;
-	snap.geom.src_w = (double)base_w;
-	snap.geom.src_h = (double)base_h;
-
-	/* Fake toast in the top-right corner (where Windows toasts live),
-	 * fake sensitive window in the lower-middle. Screen-space values
-	 * here equal source space because the fake geom is identity. */
-	snap.num_rects = 2;
-	snap.rects[0].kind = SS_RECT_TOAST;
-	snap.rects[0].screen.x = (double)base_w - 396.0;
-	snap.rects[0].screen.y = 48.0;
-	snap.rects[0].screen.w = 360.0;
-	snap.rects[0].screen.h = 96.0;
-	snap.rects[1].kind = SS_RECT_WINDOW;
-	snap.rects[1].screen.x = (double)base_w * 0.30;
-	snap.rects[1].screen.y = (double)base_h * 0.42;
-	snap.rects[1].screen.w = (double)base_w * 0.34;
-	snap.rects[1].screen.h = (double)base_h * 0.36;
-
-	ss_state_publish(&snap);
-}
-
-static void filter_video_tick(void *data, float seconds)
-{
-	UNUSED_PARAMETER(seconds);
-	struct ss_filter *f = data;
-
-	/* M1: this fake provider stands in for the M2 watcher thread.
-	 * debug_stall emits one snapshot, then freezes the heartbeat so
-	 * the render side must fail closed on heartbeat AGE (the
-	 * "watcher died" path). It can only trigger fail-closed, never
-	 * suppress it. */
-	if (f->debug_stall) {
-		if (!f->stall_published) {
-			uint64_t now0 = os_gettime_ns();
-			obs_source_t *t0 = obs_filter_get_target(f->source);
-			uint32_t w0 = t0 ? obs_source_get_base_width(t0) : 0;
-			uint32_t h0 = t0 ? obs_source_get_base_height(t0) : 0;
-			if (f->debug_rects && w0 && h0)
-				publish_fake_snapshot(f, now0, w0, h0);
-			else
-				ss_state_touch_heartbeat(now0);
-			f->stall_published = true;
-		}
-		return;
-	}
-
-	uint64_t now = os_gettime_ns();
-	if (f->debug_rects) {
-		obs_source_t *target = obs_filter_get_target(f->source);
-		uint32_t w = target ? obs_source_get_base_width(target) : 0;
-		uint32_t h = target ? obs_source_get_base_height(target) : 0;
-		if (w && h)
-			publish_fake_snapshot(f, now, w, h);
-		else
-			ss_state_touch_heartbeat(now);
-	} else {
-		ss_state_touch_heartbeat(now);
-	}
+	obs_data_set_default_bool(settings, "debug_kill", false);
 }
 
 /* ---- drawing helpers ------------------------------------------------ */
@@ -251,10 +187,6 @@ static gs_texture_t *tex_from_image(const struct ss_image *img)
 	return gs_texture_create(img->w, img->h, GS_RGBA, 1, &level, 0);
 }
 
-/* Bucket plate sizes to 16px steps so slightly-varying rects reuse a
- * cached texture instead of regenerating every frame. Buckets round UP:
- * the drawn plate is stretched down to the exact padded rect, never up
- * past its generated resolution by more than one bucket. */
 static uint32_t bucket_dim(double v)
 {
 	uint32_t d = (uint32_t)(v + 0.5);
@@ -264,7 +196,6 @@ static uint32_t bucket_dim(double v)
 
 static gs_texture_t *get_plate_texture(struct ss_filter *f, enum ss_rect_kind kind, uint32_t bw, uint32_t bh)
 {
-	/* toast uses the card style; window and field share the plate */
 	enum ss_rect_kind style = (kind == SS_RECT_TOAST) ? SS_RECT_TOAST : SS_RECT_WINDOW;
 
 	struct ss_tex_entry *victim = NULL;
@@ -358,8 +289,6 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 	}
 
 	if (!w || !h) {
-		/* Target has no video yet; nothing can leak from an empty
-		 * render, and no size exists to draw black onto. */
 		obs_source_skip_video_filter(f->source);
 		return;
 	}
@@ -372,20 +301,22 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 	bool unhealthy = !f->have_snap || age > SS_HEARTBEAT_STALE_NS;
 	const char *reason = !f->have_snap ? "no detection snapshot" : "heartbeat stale";
 
-	/* Map every rect BEFORE rendering the target: a mapping failure
-	 * must black the frame, not partially mask it. */
+	/* Map every rect BEFORE rendering the target: a mapping failure must
+	 * black the frame, not partially mask it. Geometry is resolved only
+	 * when there is something to mask. */
 	struct ss_rect mapped[SS_MAX_RECTS];
 	enum ss_rect_kind kinds[SS_MAX_RECTS];
 	size_t num_mapped = 0;
 
 	if (!unhealthy && f->snap.num_rects > 0) {
-		if (!f->snap.geometry_valid) {
+		struct ss_capture_geom geom;
+		if (!ss_resolve_capture_geom(target, &geom)) {
 			unhealthy = true;
-			reason = "capture geometry unresolved";
+			reason = "capture geometry unresolved (unsupported source or scaled capture)";
 		} else {
 			for (size_t i = 0; i < f->snap.num_rects && !unhealthy; i++) {
 				struct ss_rect out;
-				enum ss_map_result r = ss_map_screen_rect(&f->snap.geom, &f->snap.rects[i].screen,
+				enum ss_map_result r = ss_map_screen_rect(&geom, &f->snap.rects[i].screen,
 									  SS_MASK_PAD_PX, &out);
 				if (r == SS_MAP_OK) {
 					mapped[num_mapped] = out;
@@ -395,7 +326,7 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 					unhealthy = true;
 					reason = "coordinate mapping failed";
 				}
-				/* NOT_VISIBLE: rect outside capture, skip */
+				/* NOT_VISIBLE: rect outside this capture, skip */
 			}
 		}
 	}
@@ -407,8 +338,6 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 	}
 
 	if (!obs_source_process_filter_begin(f->source, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING)) {
-		/* Bypassed by libobs: the target may render unfiltered this
-		 * frame, so cover it. Uncertainty means black. */
 		draw_fail_closed(f, w, h);
 		log_mode(f, SS_MODE_FAIL_CLOSED, age, "filter chain bypassed");
 		return;
@@ -420,8 +349,6 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 		uint32_t bh = bucket_dim(mapped[i].h);
 		gs_texture_t *tex = get_plate_texture(f, kinds[i], bw, bh);
 		if (!tex) {
-			/* Cannot draw an opaque plate -> cannot guarantee
-			 * masking -> black. */
 			draw_fail_closed(f, w, h);
 			log_mode(f, SS_MODE_FAIL_CLOSED, age, "plate texture allocation failed");
 			return;
@@ -446,6 +373,5 @@ struct obs_source_info streamsentry_filter_info = {
 	.update = filter_update,
 	.get_properties = filter_get_properties,
 	.get_defaults = filter_get_defaults,
-	.video_tick = filter_video_tick,
 	.video_render = filter_video_render,
 };

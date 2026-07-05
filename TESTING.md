@@ -124,6 +124,96 @@ blackout, tracked in `reports/HUMAN_CHECKLIST.md` (M1) and PENDING above.
 
 ---
 
+## M2 — 2026-07-05 — Real detection (watcher thread)
+
+### What was built
+- Detection watcher (`src/watcher.cpp`): one COM MTA thread, refcounted across
+  filter instances, enumerating windows on a 150 ms timer and publishing real
+  screen-space rects plus a heartbeat into shared state. Replaces M1's fake
+  rects.
+- Toast detection: process-AND-class signature, determined empirically here as
+  `explorer.exe` + `Xaml_WindowedPopupClass` (Windows 11 build 26200), gated by
+  DWMWA_CLOAKED + visible + non-empty rect.
+- Blocklist detection: process-name-OR-title-substring match; built-in defaults
+  are password managers + credential dialogs. The settings textbox to edit it is
+  M3.
+- Password-field detection: a UIA focus-changed handler reads
+  `UIA_IsPasswordProperty` and reports the field's `BoundingRectangle`; the
+  handler does minimal work.
+- Filter-side capture-geometry resolution (`src/geom-resolve.c`): display/monitor
+  capture only, and only when exactly one monitor matches the source base size;
+  ambiguous or unsupported sources fail closed.
+- `src/filter.c` rewired to map the real rects through the M1 coordinate module;
+  startup is fail-closed (black) until the watcher's first heartbeat. M1's
+  fake-rect toggles were replaced by a `debug_kill` toggle that freezes the
+  heartbeat to force fail-closed and cannot disable it.
+
+### Automated evidence
+Sources: `reports/M2-verifier.md` (VERDICT: VERIFIED) and
+`reports/M2-spec-guardian.md` (RESULT: PASS), both 2026-07-05.
+- Build green: `cmake --build --preset windows-x64-local` exited 0 with zero
+  warnings; a clean full recompile compiled every M2 source and linked
+  `streamsentry.dll`.
+- ctest 2/2 pure suites passed: `coord-map-tests` and `plate-gen-tests`
+  (`ctest --test-dir build_x64 -C RelWithDebInfo --output-on-failure`,
+  exit 0). `plate-gen.c/.h` and `coord-map.c/.h` are byte-unchanged vs M1.
+- `dumpbin /dependents` on `streamsentry.dll`: `obs.dll`, `dwmapi.dll`,
+  `ole32.dll`, `USER32.dll`, `w32-pthreads.dll`, `KERNEL32.dll`, `MSVCP140.dll`,
+  `VCRUNTIME140_1.dll`, `VCRUNTIME140.dll`, and `api-ms-win-crt-*` — Windows
+  COM/DWM + the C++ runtime + libobs only. No Qt, no third-party DLL.
+- The deployed DLL under `D:\software\obs\obs-studio` matches the pinned SHA256
+  exactly (`C010F3CC5A5498C939881A40FBE21833CEDE411FBBAB0C915AD6544C5E333442`).
+  Note: the build-tree DLL was recompiled during verification, so its hash
+  differs (RelWithDebInfo embeds a fresh PDB signature); its dependents are
+  identical to the deployed copy.
+- Watcher self-test (`reports/M2-watcher-selftest-output.txt`, exit 0): watcher
+  thread starts and heartbeat advances; a blocklist rect appears when notepad
+  opens and disappears when it closes; the heartbeat freezes for >500 ms under
+  fault injection (render fails closed) and resumes on release; the thread stops
+  cleanly.
+- In-OBS integration (`reports/M2-obs-integration.txt`): RUN A (healthy) starts
+  FAIL-CLOSED at load, then clears to normal rendering ~140 ms later once the
+  heartbeat is fresh; RUN B (`debug_kill=true`) stays fail-closed for the whole
+  run (no "cleared" line) with the heartbeat frozen. Both end with a clean
+  watcher shutdown. OBS was launched only for these two documented runs.
+
+### Manual acceptance — STATUS: PENDING
+The on-screen confirmation is in `reports/HUMAN_CHECKLIST.md` (M2 section);
+steps are not duplicated here. The human has not yet visually confirmed the
+password-field privacy plate, the toast card, the blocklist-window plate,
+plate opacity, and the fail-closed blackout on screen.
+
+Verification gaps carried from the reports (both auditors flagged these):
+- The automated toast test was INCONCLUSIVE: this machine has Do Not Disturb /
+  Focus Assist active, which routes toasts to the notification center with a
+  0x0 rect, so no on-screen banner ever appeared. Turn Do Not Disturb OFF
+  before the manual toast check.
+- Live password-field-to-plate masking was NOT machine-verified: the self-test
+  exercises the UIA focus-changed path structurally (handler registration) but
+  does not focus a real password field, so the field-rect-to-plate result is a
+  manual-matrix item.
+- The blocklist match-semantics decision (process-name-OR-title-substring vs
+  CLAUDE.md's "process AND class") is documented in `reports/M2-DECISIONS.md`
+  and awaits the owner's ruling (see `reports/HUMAN_CHECKLIST.md`).
+
+### Not yet covered by automation
+Per `reports/M2-verifier.md`: real on-screen toast masking (DND-blocked here),
+end-to-end UIA password-field masking, coordinate landing accuracy on a second
+monitor with different DPI and on scaled/cropped sources, and the blocklist
+settings-textbox wiring (deferred to M3) are not machine-verified. Performance
+(watcher CPU cost) and the 2-hour idle leak run remain SPEC manual-matrix items.
+
+### Manual in-OBS test matrix from SPEC.md — still outstanding
+M2 makes the SPEC acceptance behaviors exercisable for the first time: toast
+masking (needs DND off), blocklist-window masking, and the password-field
+guard on real detected windows, plus the fail-closed blackout. All are tracked
+in `reports/HUMAN_CHECKLIST.md` (M2) and PENDING above. `src/watcher.cpp`,
+`src/geom-resolve.c`, and the M2 render wiring in `src/filter.c` have no unit
+tests (they depend on live OS window state / libobs graphics) and rest on the
+self-test plus the in-OBS logs above.
+
+---
+
 ## Post-M0 — 2026-07-05 — Renamed obsplugin → StreamSentry
 
 No behavior change; identity-only rename (see CHANGELOG.md for the full
