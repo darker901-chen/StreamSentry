@@ -33,11 +33,11 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.example.obsplugin"
+            "bundleId": "com.example.streamsentry"
         }
     },
-    "name": "obsplugin",
-    "displayName": "obsplugin",
+    "name": "streamsentry",
+    "displayName": "StreamSentry",
     "version": "0.1.0",
     "author": "darker",
     "website": "https://example.com",
