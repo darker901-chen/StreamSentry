@@ -376,3 +376,100 @@ that session's protected primary working directory. A verified full mirror
 (git history, working tree, `.deps`) was made via `robocopy` to
 `F:\StreamSentry`. Treat `F:\StreamSentry` as canonical going forward;
 `F:\obsplugin` can be deleted manually once confirmed redundant.
+
+---
+
+## M5 — 2026-07-06 — v0.2 kickoff (docs + governance)
+
+M5 changed no code and no behavior — it opens the v0.2 cycle with
+documentation and governance only. The change set is exactly four files:
+`ARCHITECTURE.md` (new: as-built v0.1 record — module map, thread model,
+fail-closed state machine with trigger table, data flow, render-side plate
+caching, test infrastructure, known architectural limits), `SPEC.md`
+(retitled to cover both versions; Part 1 kept as the shipped v0.1 baseline
+plus one inline as-built note; new Part 2 = the owner-approved v0.2 items,
+a v0.2 out-of-scope list, and the v0.2 acceptance-matrix additions),
+`CLAUDE.md` (iron rule 5 scope lock v0.1 → v0.2; matching line aligned with
+owner ruling a434b18), and `.gitignore` (whitelists ARCHITECTURE.md). No
+`src/`, `tests/`, or `CMakeLists.txt` changes; no version bump.
+
+### Automated evidence
+Sources: `reports/M5-verifier.md` (FINAL VERDICT: VERIFIED, 5/5 checks) and
+`reports/M5-spec-guardian.md` (Verdict: PASS), both 2026-07-06.
+- Change-set containment: `git status --short`, run before AND after the
+  build, shows exactly the four staged doc files — no entry for `src/`,
+  `tests/`, or `CMakeLists.txt`.
+- From-scratch build green: `build_x64` was deleted first, then
+  `cmake --preset windows-x64-local` (exit 0) and
+  `cmake --build --preset windows-x64-local` (RelWithDebInfo, exit 0)
+  recompiled every translation unit. A warning grep over the full build log
+  (`warning|error|fatal|C4\d{3}|C5\d{3}|LNK\d+`, plus localized zh-TW
+  variants) found zero matches. Verifier caveat: unlike M4, this run did not
+  set `CMAKE_COMPILE_WARNING_AS_ERROR`, so the zero-warning claim rests on
+  that log grep of a full clean recompile.
+- Automated tests: `ctest --test-dir build_x64 -C RelWithDebInfo
+  --output-on-failure` exit 0, 2/2 suites; the executables were also run
+  directly — `coord-map-tests` 11/11 and `plate-gen-tests` 7/7 (18/18
+  cases).
+- Artifacts present: `streamsentry.dll` + `.pdb` (DLL byte size identical
+  to the M4-verified DLL), both test executables, and
+  `watcher-selftest.exe`. The self-test was built but intentionally NOT run
+  this milestone (it is manual-only: it launches notepad and fires a real
+  toast).
+- Document-content audit (spec-guardian): all six iron rules present, five
+  byte-identical; rule 5's v0.1 → v0.2 bump is the one owner-approved change
+  (per `reports/V02-PLAN.md`). SPEC Part 2 maps 1:1 onto the approved plan
+  (2.1/2.2 → M6, 2.3/2.4 → M7, 2.5 → M8; 2.6 Chromium investigation is
+  documentation-only, non-gating) with nothing beyond it. CLAUDE.md's
+  matching line agrees with the FINAL ruling a434b18 AND with the as-built
+  code in `src/watcher.cpp`. ARCHITECTURE.md was spot-checked
+  claim-by-claim against `src/` — no materially false claim found.
+
+### Manual acceptance — STATUS: NOT REQUIRED (no behavior change)
+Nothing in M5 can change what a user sees in OBS, so M5 adds no new manual
+in-OBS steps; OBS was not launched during verification. The manual-matrix
+additions for the v0.2 features (watcher perf hardening, toast geometry
+narrowing, allowlist mode, panic hotkey, window-picker UI) arrive with
+M6–M8 — SPEC.md Part 2 already carries the v0.2 acceptance rows those
+milestones must satisfy.
+
+### Manual in-OBS checklist — current status after M5
+Since M4 the owner field-tested v0.1 live (recorded in
+`reports/V02-PLAN.md`, session of 2026-07-05), which moves several items:
+- Field-validated: SRT streaming works with the filter active; blocklist
+  masking works live (log shows up to 27 simultaneous plates); mid-plate
+  rendering solid. The settings dialog was used live in that session (the
+  owner's UX findings target the blocklist textbox), though no report line
+  separately confirms an edited line taking effect; M8's picker rework
+  supersedes this dialog.
+- RESOLVED: the blocklist match-semantics question. The owner ruling is
+  FINAL (commit a434b18): process-name OR title-substring, case-insensitive;
+  M5 codifies it in CLAUDE.md. Do not re-ask.
+- Field findings feeding v0.2 (they gate M6/M7, not the human checklist):
+  fail-closed heartbeat-stale blips under streaming load (age 501–505 ms,
+  clearing ~100–150 ms later, roughly once a minute) and toast
+  over-matching (shell flyouts share the XAML class → 9–27 plates
+  flapping) → M6; the blocklist cannot protect unanticipated windows →
+  M7 allowlist mode.
+
+Still outstanding for the human ~10-minute pass (carried; steps live in
+`reports/HUMAN_CHECKLIST.md`):
+- A real single notification toast masked as the notification card, with Do
+  Not Disturb OFF (the field test surfaced over-match noise, not a
+  confirmed single-toast card; M6's geometry narrowing re-opens this row
+  with a mandatory real-toast acceptance check anyway).
+- End-to-end password-field privacy plate on a real focused field (Chromium
+  fields are undetected — documented v0.1 limitation; per-browser
+  investigation is non-gating v0.2 item 2.6).
+- Coordinate landing accuracy on a second monitor / different DPI and on a
+  scaled or cropped capture.
+- Full 2-hour endurance soak (30 minutes measured in M3; the approved plan
+  re-runs perf + soak in M6).
+- Minor: one explicit glance that the filter entry reads **StreamSentry**
+  (the field session used the filter live, but no report line records the
+  displayed name).
+
+Directory note (supersedes the post-rename note above): per
+`reports/V02-PLAN.md`, v0.2 work continues in `F:\obsplugin` (the
+session-protected primary working directory); `F:\StreamSentry` is the
+robocopy mirror, synced after each milestone.

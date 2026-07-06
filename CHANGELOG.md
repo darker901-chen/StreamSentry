@@ -5,6 +5,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+Two unreleased sets live here, newest first: the v0.2 development cycle
+(M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
+Nothing has been pushed or tagged; publishing is a human step.
+
+### 0.2.0-m5 - 2026-07-06
+
+Milestone M5 opens the v0.2 cycle: documentation and governance only — no
+code, test, or build-system change. The change set is exactly four files
+(`.gitignore`, `ARCHITECTURE.md`, `CLAUDE.md`, `SPEC.md`); there is no
+version bump, so the module still builds as `streamsentry.dll` 0.1.0.
+v0.2 itself was approved by the owner on 2026-07-05 after hands-on field
+testing of v0.1 (plan and field findings in `reports/V02-PLAN.md`).
+Verified by `reports/M5-verifier.md` (VERDICT: VERIFIED, 5/5 checks:
+from-scratch configure + build exited 0 with zero compiler/linker warnings,
+ctest 2/2 suites — 18/18 cases, artifacts present, source tree untouched)
+and `reports/M5-spec-guardian.md` (RESULT: PASS).
+
+#### Added
+- `ARCHITECTURE.md`: as-built record of the shipped v0.1 code — module map,
+  thread model, fail-closed state machine with its trigger table, data flow,
+  render-side plate caching, test infrastructure, and known architectural
+  limits. The spec-guardian spot-checked its claims against `src/`
+  claim-by-claim and found no materially false claim.
+- `SPEC.md` Part 2: the owner-approved v0.2 scope — watcher performance
+  hardening (M6), toast geometry narrowing (M6), allowlist mode (M7), panic
+  hotkey (M7), and window-picker UI (M8), plus a non-gating Chromium
+  password-field investigation — with a v0.2 out-of-scope list and a v0.2
+  acceptance-matrix addition table. Nothing in Part 2 exceeds the approved
+  plan in `reports/V02-PLAN.md`.
+
+#### Changed
+- `SPEC.md`: retitled to cover both versions. Part 1 (v0.1) is preserved as
+  the shipped baseline except one inline as-built note: the Win11 toast
+  signature (`explorer.exe` + `Xaml_WindowedPopupClass`) supersedes the
+  spec's Win10-era `ShellExperienceHost` example.
+- `CLAUDE.md`: iron rule 5's scope lock bumped v0.1 → v0.2 — the only
+  owner-approved rule change; the other five iron rules are byte-identical.
+  The architecture matching line now records the FINAL owner ruling (commit
+  a434b18): toast signature = process AND class; block/allowlist matching =
+  process image name OR window title (case-insensitive substring) —
+  resolving the former CLAUDE-vs-code tension in the ruled direction. The
+  summary paragraph now mentions allowlist mode and the panic hotkey.
+- `.gitignore`: added a `!ARCHITECTURE.md` whitelist line (the template
+  ignores everything not explicitly whitelisted).
+
+### 0.1.0 release candidate (M0-M4)
+
 This Unreleased set (milestones M0 through M4 below) constitutes release
 candidate **0.1.0** — ship-ready but not yet published. Publishing and tagging
 are a human step (see `reports/FINAL.md`); nothing here has been pushed or

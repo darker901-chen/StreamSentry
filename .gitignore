@@ -19,6 +19,7 @@
 # Project governance and workflow files (this project)
 !CLAUDE.md
 !SPEC.md
+!ARCHITECTURE.md
 !SETUP.md
 !TESTING.md
 !CHANGELOG.md
