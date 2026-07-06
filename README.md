@@ -131,16 +131,38 @@ tray icon, auto-update.
 
 ## Building from source
 
-See [SETUP.md](SETUP.md). In short, with CMake 3.28+ and the Visual Studio
-2022 C++ build tools:
+Prerequisites: Visual Studio 2022 C++ build tools, CMake 3.28+, Git.
 
 ```
 cmake --preset windows-x64
 cmake --build --preset windows-x64
 ```
 
+If configure fails because the preset pins a Windows SDK version your
+machine doesn't have, create an untracked `CMakeUserPresets.json` with a
+preset that inherits `windows-x64` but drops the SDK version pin
+(`"architecture": "x64"` only), then build with that preset.
+
 Pure-logic modules (coordinate mapping, plate generation) have unit tests:
 `ctest --test-dir build_x64 -C RelWithDebInfo`.
+
+## Documentation guide
+
+**Using the plugin?** This README and [CHANGELOG.md](CHANGELOG.md) are
+all you need (plus [LICENSE](LICENSE)).
+
+**Reading or modifying the code?** Start with
+[ARCHITECTURE.md](ARCHITECTURE.md) (how it is actually built),
+[SPEC.md](SPEC.md) (what it must do, and what is deliberately out of
+scope), and [TESTING.md](TESTING.md) (what has been verified, and how).
+
+**Everything else is internal project process** — you can safely ignore
+it: [CLAUDE.md](CLAUDE.md) (iron rules for the AI-assisted workflow that
+builds this plugin), [SETUP.md](SETUP.md) (dev-box bootstrap notes,
+Traditional Chinese, machine-specific), [reports/](reports/) (frozen
+per-milestone verification evidence — see its own README),
+`.claude/` (workflow agent definitions), `scripts/` (dev environment
+bootstrap).
 
 ## License
 

@@ -1,5 +1,9 @@
 # SETUP — 從零到開工(你只跑指令,環境交給 Claude Code)
 
+> **Internal doc.** Dev-box bootstrap notes for this project's own
+> machines (Traditional Chinese, machine-specific paths). If you just
+> want to build the plugin, see README.md § Building from source.
+
 ## 你實際要做的事,只有這些
 1. 解壓縮這個 zip 到 `C:\dev\<PLUGIN_NAME>\`(名字定案後資料夾一起改名)。
 2. 裝一個東西:**App Installer**(給你 winget 指令)。多數 Win11 已內建;沒有的話開
