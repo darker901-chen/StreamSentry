@@ -48,6 +48,8 @@ target_sources(
     src/shared-state.h
     src/geom-resolve.c
     src/geom-resolve.h
+    src/toast-gate.c
+    src/toast-gate.h
     src/watcher.cpp
     src/watcher.h
 )
@@ -75,8 +77,10 @@ if(STREAMSENTRY_BUILD_TESTS)
   enable_testing()
   add_executable(coord-map-tests tests/coord-map-tests.c src/coord-map.c)
   add_executable(plate-gen-tests tests/plate-gen-tests.c src/plate-gen.c)
+  add_executable(toast-gate-tests tests/toast-gate-tests.c src/toast-gate.c)
   add_test(NAME coord-map-tests COMMAND coord-map-tests)
   add_test(NAME plate-gen-tests COMMAND plate-gen-tests)
+  add_test(NAME toast-gate-tests COMMAND toast-gate-tests)
 
   # Watcher self-test: exercises the real COM MTA watcher thread + Win32
   # enumeration + blocklist matching, stubbing the two libobs symbols the
@@ -84,7 +88,8 @@ if(STREAMSENTRY_BUILD_TESTS)
   # NOT registered with add_test(): it launches notepad and fires a toast,
   # so it is run explicitly for M2 evidence, not in the pure ctest sweep.
   if(WIN32)
-    add_executable(watcher-selftest tests/watcher-selftest.cpp src/watcher.cpp src/shared-state.c)
+    add_executable(watcher-selftest tests/watcher-selftest.cpp src/watcher.cpp src/shared-state.c
+                                    src/toast-gate.c)
     target_include_directories(
       watcher-selftest
       PRIVATE src "$<TARGET_PROPERTY:OBS::libobs,INTERFACE_INCLUDE_DIRECTORIES>"

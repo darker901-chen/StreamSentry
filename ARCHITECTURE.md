@@ -1,10 +1,10 @@
-# ARCHITECTURE.md — StreamSentry as built (v0.1)
+# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 M6)
 
-This documents the plugin **as actually built and shipped in v0.1**
-(HEAD at M4), not aspirations. When code and this file disagree, the
-code is the bug or this file is — fix one. The governing constraints
-live in CLAUDE.md (iron rules) and SPEC.md; this file explains how the
-implementation satisfies them.
+This documents the plugin **as actually built**, not aspirations —
+v0.1 as shipped at M4, plus the M6 hardening changes (marked "M6").
+When code and this file disagree, the code is the bug or this file is
+— fix one. The governing constraints live in CLAUDE.md (iron rules)
+and SPEC.md; this file explains how the implementation satisfies them.
 
 ## Module map
 
@@ -15,6 +15,7 @@ implementation satisfies them.
 | [src/coord-map.c](src/coord-map.c) / .h | Pure C, no OBS, no Windows | Screen-rect → source-rect mapping: intersect with captured region, scale, pad (over-mask), clamp. Unit-tested standalone. Any degenerate/non-finite input → `SS_MAP_INVALID`, which callers must treat as fail-closed. |
 | [src/geom-resolve.c](src/geom-resolve.c) / .h | C, Win32 + libobs | Resolves *what the filter's target source captures* (virtual-screen region + source pixel size). v0.1: `monitor_capture` only, and only when exactly one monitor's pixel size matches the source base size. Everything else → false → caller fails closed. |
 | [src/plate-gen.c](src/plate-gen.c) / .h | Pure C, no OBS, no Windows | CPU generator for mask visuals (RGBA8888): toast card, privacy plate, fail-closed status banner. Opacity (iron rule 3) is a *tested property*: `ss_image_opaque_inside()` + `ss_plate_max_corner_inset()` let unit tests prove every pixel inside the corner inset is alpha-255. |
+| [src/toast-gate.c](src/toast-gate.c) / .h (M6) | Pure C, no OBS, no Windows | Toast geometry gate (SPEC 2.2): right-edge spawn band + generous size envelope, evaluated per monitor. Applied *after* the process+class signature; only removes toast-card over-masking. Uncertainty (no monitors, degenerate input) classifies as toast — the gate can only fail toward masking. Constants are PROVISIONAL documented-metrics values (owner ruling 2026-07-09, reports/M6-toast-probe.txt) pending on-machine calibration. |
 | [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings, per-frame health decision, coordinate mapping, plate texture cache, fail-closed rendering. |
 | [src/plugin-main.c](src/plugin-main.c) | C, libobs | Module entry: `ss_state_init()` + `obs_register_source(&streamsentry_filter_info)`. |
 | src/plugin-support.c.in | template | obs-plugintemplate logging support (`obs_log`). |
@@ -67,25 +68,35 @@ the heartbeat is only ever written together with a full successful
 publish, so a heartbeat always certifies a *completed* detection pass,
 never a partially-alive loop. Keep it that way.
 
+M6 additions on the watcher thread (no new locks): a PID→image-name
+cache (watcher-thread-only; entries evicted after one tick of absence;
+failed lookups deliberately not cached; PID-reuse residual race
+documented in watcher.cpp per SPEC 2.1), per-tick monitor-rect
+enumeration feeding the toast geometry gate, and an always-compiled
+LOG_WARNING when a single tick exceeds 250ms (half the stale
+threshold). Thread priority is deliberately untouched — SPEC 2.1 makes
+it the second lever, only if p99 under load still approaches the
+threshold after the cache.
+
 ## Data flow (one healthy frame)
 
 ```
 watcher thread, every 150ms                     OBS graphics thread, every frame
 ---------------------------                     --------------------------------
-EnumWindows pass:                               filter_video_render:
-  visible? not DWM-cloaked? non-empty rect?       enabled? target has size? else skip
-  toast:  proc==explorer.exe                      ss_state_try_read -> snapshot
-          AND class==Xaml_WindowedPopupClass      heartbeat age > 500ms? -> FAIL-CLOSED
-  block:  entry substring-matches process         rects present?
-          image name OR window title                ss_resolve_capture_geom(target)
-UIA focus rect (if valid) appended                   (monitor_capture, unambiguous
-snapshot.heartbeat = os_gettime_ns()                  monitor match only) else FAIL-CLOSED
-ss_state_publish(snapshot)                           ss_map_screen_rect(+12px pad) each rect
-                                                     OK -> keep; NOT_VISIBLE -> skip;
-                                                     INVALID -> FAIL-CLOSED
-                                                  render target through filter chain
-                                                  draw plate texture per mapped rect
-                                                  (toast card / privacy plate)
+EnumDisplayMonitors -> monitor rects (M6)       filter_video_render:
+EnumWindows pass:                                 enabled? target has size? else skip
+  visible? not DWM-cloaked? non-empty rect?       ss_state_try_read -> snapshot
+  toast:  proc==explorer.exe                      heartbeat age > 500ms? -> FAIL-CLOSED
+          AND class==Xaml_WindowedPopupClass      rects present?
+          AND geometry gate (M6; gate-fail          ss_resolve_capture_geom(target)
+          falls through to block/allowlist)          (monitor_capture, unambiguous
+  block:  entry substring-matches process             monitor match only) else FAIL-CLOSED
+          image name OR window title                 ss_map_screen_rect(+12px pad) each rect
+  (proc names via PID cache, M6)                     OK -> keep; NOT_VISIBLE -> skip;
+UIA focus rect (if valid) appended                   INVALID -> FAIL-CLOSED
+snapshot.heartbeat = os_gettime_ns()              render target through filter chain
+ss_state_publish(snapshot)                        draw plate texture per mapped rect
+tick > 250ms -> LOG_WARNING (M6)                  (toast card / privacy plate)
 ```
 
 Rect kinds: `SS_RECT_TOAST` → notification card; `SS_RECT_WINDOW` and
@@ -167,6 +178,7 @@ Measured (M3, reports/M3-perf.md): watcher ≈ 0.55% of one core at
 |---|---|---|
 | `coord-map-tests` (ctest) | pure unit | mapping math: intersection, mixed-DPI scaling, padding, clamping, INVALID on degenerate input |
 | `plate-gen-tests` (ctest) | pure unit | **opacity as a property**: plates opaque inside corner inset; corner inset < mask pad; banner opaque |
+| `toast-gate-tests` (ctest, M6) | pure unit | geometry gate: documented toast shapes pass at 100–200% DPI (incl. slide-in and secondary-monitor cases); recorded flyover shapes rejected; **uncertainty classifies as toast** (no monitors / degenerate / NaN input) |
 | `watcher-selftest` (manual exe, not registered with `add_test`) | integration | real EnumWindows/UIA against a live desktop: spawns notepad, fires a toast, exercises blocklist matching and the kill→stale-heartbeat path with obs stubs |
 
 The selftest links `watcher.cpp + shared-state.c` directly with its own
@@ -180,16 +192,23 @@ not include dllimport-decorated OBS headers.
 - Two monitors with identical pixel size are indistinguishable →
   ambiguous → fail closed. (geom-resolve.c)
 - Toast signature is per-Windows-build-family (verified on Win11 26200:
-  explorer.exe + Xaml_WindowedPopupClass, which over-matches other
-  explorer XAML flyouts — over-mask by design; v0.2 narrows this by
-  geometry). SPEC.md's Win10-era ShellExperienceHost example is
-  superseded by the code comment. (watcher.cpp)
+  explorer.exe + Xaml_WindowedPopupClass; over-matches other explorer
+  XAML flyouts). SPEC.md's Win10-era ShellExperienceHost example is
+  superseded by the code comment. (watcher.cpp) **M6 update:** matches
+  are now narrowed by the toast-gate geometry check with PROVISIONAL
+  documented-metrics constants — banners were system-suppressed on the
+  dev machine 2026-07-09 so live calibration and signature
+  re-verification on build 26200.8655 are deferred to the owner's
+  acceptance pass (owner ruling; evidence and the shell-class changes
+  observed on .8655 in reports/M6-toast-probe.txt).
 - Blocklist matching is case-insensitive substring against process
   image name **OR** window title — owner ruling FINAL, commit a434b18.
-- Per-tick `OpenProcess`/`QueryFullProcessImageNameW` for every visible
-  window is the suspected cause of rare heartbeat-stall blips under
-  streaming load (v0.2 M6 target: PID→name cache + tick p99
-  measurement).
+- ~~Per-tick `OpenProcess`/`QueryFullProcessImageNameW` for every
+  visible window~~ **fixed in M6** by the PID→name cache (bounded
+  residual: PID reuse across a one-tick gap can serve a stale name for
+  proc-name matching; title matching unaffected — see watcher.cpp).
+  Tick p99 measurement under streaming load is on the owner's soak
+  checklist.
 - `SS_MAX_RECTS = 64` caps reported rects; the enum pass stops at the
   cap (v0.1 never hit it in the field — 27 was the observed max).
 - Chromium password fields: a11y tree not always active → focus events

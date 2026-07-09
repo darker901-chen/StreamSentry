@@ -9,6 +9,103 @@ Two unreleased sets live here, newest first: the v0.2 development cycle
 (M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
 Nothing has been pushed or tagged; publishing is a human step.
 
+### 0.2.0-m6 - 2026-07-09
+
+Milestone M6 is the first v0.2 code milestone: watcher performance hardening
+(SPEC Part 2 item 2.1) and toast-match narrowing by geometry (SPEC Part 2
+item 2.2) — the two fixes driven by the 2026-07-05 field findings
+(heartbeat-stale fail-closed blips under streaming load; shell flyouts
+sharing the toast window class and producing plate storms). The change set is
+exactly seven files: `src/watcher.cpp`, new `src/toast-gate.c`/`.h`, new
+`tests/toast-gate-tests.c`, `CMakeLists.txt`, `ARCHITECTURE.md`, and new
+`reports/M6-toast-probe.txt`. No version bump; the module still builds as
+`streamsentry.dll` 0.1.0. Verified by `reports/M6-verifier.md` (FINAL
+VERDICT: VERIFIED, 7/7 checks — from-scratch configure + build, preset
+`windows-x64-local` RelWithDebInfo, zero compiler/linker warnings in both
+`STREAMSENTRY_PERF_LOG` variants with the tree left OFF; ctest 3/3 suites;
+watcher-selftest 8/8 deterministic checks, toast leg INCONCLUSIVE because
+banners are system-suppressed on the dev machine; its ADDENDUM is
+authoritative — `src/watcher.cpp` was amended mid-verification and the full
+sequence was re-run clean against the final tree) and
+`reports/M6-spec-guardian.md` (Verdict: PASS on re-audit — one first-pass
+residual fixed in-milestone, zero open code findings, both M5 audit
+observations closed).
+
+#### Added
+- Toast geometry gate (`src/toast-gate.c`/`.h`, a pure module): after the
+  v0.1 process-AND-class toast signature, a candidate must ALSO sit in the
+  right-edge spawn band of some monitor (right edge within 160 px of the
+  monitor's right edge; full monitor height, so top-right and bottom-right
+  anchors and slide-in overhang all pass) and have plausible banner
+  dimensions (width 200–1000 px and ≤ 60% of monitor width; height
+  60–1200 px and ≤ 90% of monitor height). A window that fails the gate loses
+  only the toast-card classification and still falls through to
+  block/allowlist matching; any uncertainty (no or incomplete monitor data,
+  degenerate geometry) classifies as toast — the over-mask direction, per
+  iron rule 1. This narrows the v0.1 over-match in which Start-search and
+  taskbar flyouts sharing the toast window class flapped 9–27 "Notification
+  hidden" plates.
+- The gate constants are PROVISIONAL: derived from documented Windows toast
+  metrics (396-DIP banner width) with generous over-mask-safe bounds and
+  derivations in code comments, because toast banners are currently
+  system-suppressed on the dev machine and no live banner could be captured.
+  An owner ruling (2026-07-09, recorded with the full diagnosis in
+  `reports/M6-toast-probe.txt`) authorizes this for M6 and defers empirical
+  calibration plus re-verification of the v0.1 toast signature on Windows
+  build 26200.8655 to the owner acceptance pass — both remain binding for
+  the v0.2 ship.
+- New ctest suite `toast-gate-tests` (`tests/toast-gate-tests.c`, 23
+  assertions): positive toast shapes at 100/150/200% DPI including slide-in
+  animation and a negative-origin secondary monitor; negative fixtures
+  recorded from live shell/app flyovers (probe record); multi-monitor
+  any-semantics; uncertainty-must-mask cases (NULL/zero monitors, degenerate,
+  NaN). The one admitted flyover shape (tray-overflow-sized, right-edge) is
+  asserted as deliberate over-mask, so any future tightening is a conscious
+  act.
+- PID→image-name cache in the watcher (`src/watcher.cpp`): keyed by PID; an
+  entry is evicted after one full tick of absence (a reused PID re-queries);
+  failed lookups are never cached, so process-name matching keeps retrying;
+  the residual PID-reuse race (reuse within one tick-to-tick window) is
+  documented in code and does not affect title-substring matching.
+- Always-compiled slow-tick warning: any watcher tick over 250 ms — half the
+  500 ms fail-closed stale threshold — logs a warning in every build,
+  independent of `STREAMSENTRY_PERF_LOG`. A compile-time constant, not a
+  user setting.
+
+#### Changed
+- `STREAMSENTRY_PERF_LOG` instrumentation (still a CMake option, OFF by
+  default and compiled out of the shipping build) now reports per-200-tick
+  avg/max/p99 tick cost plus PID-cache hit/eviction counts, upgraded from
+  M3's plain tick-cost logging.
+- The watcher re-enumerates monitors every tick for the gate; if enumeration
+  fails, truncates at the 16-monitor cap, or any `GetMonitorInfoW` call
+  fails, the gate is handed an EMPTY monitor list, so every signature-matched
+  window is masked as a toast (v0.1-parity over-mask). This guard was flagged
+  by the spec-guardian's first pass (incomplete enumeration previously failed
+  toward unmask in 17-plus-monitor or hot-unplug-race configurations) and
+  fixed in-milestone; the re-audit confirms the over-mask direction.
+- Watcher thread priority deliberately NOT raised (SPEC 2.1's measure-first
+  sequencing): the approved second lever stays unused until the soak
+  measurement demands it, recorded in a code comment at the thread-creation
+  site. Heartbeat and fail-closed semantics are untouched by this milestone.
+- `CMakeLists.txt`: `toast-gate.c` added to the plugin target and to
+  `watcher-selftest`; new `toast-gate-tests` ctest executable registered.
+- `ARCHITECTURE.md`: M6 as-built updates (gate module, cache,
+  instrumentation, the provisional-constants record, and the owner soak
+  checklist).
+
+#### Pending owner acceptance (binding for the v0.2 ship)
+- SPEC 2.1 acceptance row: a 30-minute streaming soak with zero
+  stale-heartbeat fail-closed events and a measured tick p99 ≤ 50 ms recorded
+  in `reports/`. A perf-instrumented build was deployed to the owner's OBS on
+  2026-07-09 for this measurement; nothing in the M6 verification measured
+  tick latency under load.
+- SPEC 2.2 acceptance rows: no plate storm from Start search / taskbar
+  flyouts, and a real toast still masked before its content is readable —
+  plus the deferred calibration and signature re-verification above, blocked
+  until toast banners display on the dev machine again. See TESTING.md (M6)
+  for the exact checklist, including the banner-suppression diagnostic note.
+
 ### 0.2.0-m5 - 2026-07-06
 
 Milestone M5 opens the v0.2 cycle: documentation and governance only — no

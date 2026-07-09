@@ -473,3 +473,162 @@ Directory note (supersedes the post-rename note above): per
 `reports/V02-PLAN.md`, v0.2 work continues in `F:\obsplugin` (the
 session-protected primary working directory); `F:\StreamSentry` is the
 robocopy mirror, synced after each milestone.
+
+---
+
+## M6 — 2026-07-09 — v0.2 hardening (watcher perf + toast geometry gate)
+
+### What was built
+- Watcher performance hardening (SPEC Part 2 item 2.1; `src/watcher.cpp`):
+  - PID→image-name cache keyed by PID. An entry is trusted only while its PID
+    is observed in consecutive ticks: absent for one full tick → evicted; a
+    reused PID re-queries. Failed lookups are never cached, so process-name
+    matching keeps retrying. The residual PID-reuse race (reuse within a
+    single tick-to-tick window) is documented in code as bounded;
+    title-substring matching is unaffected by it.
+  - Always-compiled slow-tick warning: any watcher tick > 250 ms logs a
+    warning in every build — a compile-time constant (half the 500 ms
+    fail-closed stale threshold) outside every `#ifdef`, not a user setting.
+  - `STREAMSENTRY_PERF_LOG` instrumentation upgraded: per-200-tick
+    avg/max/p99 tick cost plus cache hit/eviction counts. The CMake option
+    stays OFF by default and compiled out of the shipping build.
+  - Thread priority deliberately NOT applied (SPEC's measure-first order);
+    recorded in a comment at the thread-creation site; zero
+    `SetThreadPriority` calls in `src/`.
+  - Heartbeat semantics untouched: the heartbeat is still written only with a
+    completed publish, and the kill path still freezes both.
+- Toast-match narrowing by geometry (SPEC Part 2 item 2.2):
+  - New pure module `src/toast-gate.c`/`.h`, applied AFTER the v0.1
+    process-AND-class signature: the window must sit in the right-edge spawn
+    band of some monitor (right edge within 160 px of the monitor's right
+    edge; one-sided, so slide-in overhang passes; vertical position free, so
+    top-right and bottom-right anchors both pass) and have plausible banner
+    dimensions (width 200–1000 px and ≤ 60% of monitor width; height
+    60–1200 px and ≤ 90% of monitor height). Monitors are re-enumerated every
+    tick.
+  - Gate failure only removes the toast-card classification — the window
+    still falls through to block/allowlist matching. Fail-closed health is
+    not involved in the gate at all.
+  - Uncertainty classifies as toast (mask): NULL/degenerate/non-finite
+    monitor or window geometry, or no monitor data at all.
+  - Monitor-list truncation guard (spec-guardian first-pass finding, fixed
+    in-milestone): if `EnumDisplayMonitors` fails, the list truncates at the
+    16-monitor cap, or `GetMonitorInfoW` fails for any monitor, the gate is
+    handed an EMPTY monitor list — every signature match is then masked as a
+    toast (v0.1-parity over-mask) instead of a toast on an unlisted monitor
+    going unmasked.
+  - The gate constants are PROVISIONAL — derived from documented Windows
+    toast metrics (396-DIP banner) with generous over-mask-safe bounds and
+    derivations in code comments — under the OWNER RULING of 2026-07-09
+    recorded in `reports/M6-toast-probe.txt`: toast banners are
+    system-suppressed on this machine, so no live banner could be captured
+    for calibration.
+- New ctest suite `toast-gate-tests` (`tests/toast-gate-tests.c`, 23
+  assertions): positive toast shapes at 100/150/200% DPI including slide-in
+  animation and a negative-origin secondary monitor; negative flyover
+  fixtures recorded live in `reports/M6-toast-probe.txt` (the one admitted
+  tray-overflow-sized shape is asserted as deliberate over-mask, so future
+  tightening is a conscious act); multi-monitor any-semantics; and
+  uncertainty-must-mask cases (NULL/zero monitors, degenerate, NaN).
+- `CMakeLists.txt`: `toast-gate.c` wired into the plugin, the new ctest
+  target, and `watcher-selftest`. `ARCHITECTURE.md` updated as-built.
+  `reports/M6-toast-probe.txt` added (probe evidence + owner ruling).
+
+### Automated evidence
+Sources: `reports/M6-verifier.md` (FINAL VERDICT: VERIFIED — 7/7 checks; its
+ADDENDUM is authoritative: `src/watcher.cpp` was amended mid-verification —
+the monitor-truncation guard — so the tree was pinned by blob hash and the
+entire from-scratch sequence re-run clean against the final staged tree) and
+`reports/M6-spec-guardian.md` (Verdict: PASS on re-audit; the one first-pass
+residual was fixed in-milestone and re-verified in the over-mask direction;
+zero open code findings; both due M5 observations closed), both 2026-07-09.
+- From-scratch build green (`build_x64` deleted first):
+  `cmake --preset windows-x64-local` then
+  `cmake --build --preset windows-x64-local` (RelWithDebInfo), both exit 0,
+  every translation unit recompiled. Warning grep over the full build logs
+  (EN + localized zh-TW patterns) → zero matches. Same caveat as M5: the
+  preset does not set `CMAKE_COMPILE_WARNING_AS_ERROR`; the zero-warning
+  claim rests on that log grep.
+- Both `STREAMSENTRY_PERF_LOG` variants compile clean: reconfigure with
+  `-DSTREAMSENTRY_PERF_LOG=ON` → build → reconfigure `=OFF` → build, the
+  cache value verified in `CMakeCache.txt` at each step; the tree is LEFT in
+  the OFF state — the shipping configuration.
+- `ctest --test-dir build_x64 -C RelWithDebInfo --output-on-failure` exit 0,
+  3/3 suites: `coord-map-tests`, `plate-gen-tests`, `toast-gate-tests` (newly
+  registered). Each test executable was also run directly: "all passed",
+  exit 0 each.
+- `watcher-selftest.exe` exit 0 — 8/8 deterministic checks (thread start,
+  heartbeat advance, blocklist rect appears/disappears around a notepad
+  launch/kill, heartbeat frozen > 500 ms under fault injection → render fails
+  closed, resume after release, clean stop). The toast leg is INCONCLUSIVE —
+  EXPECTED on this machine: banners are system-suppressed (see item 4 below),
+  so no banner window exists to detect.
+- Artifacts present in `build_x64/RelWithDebInfo/`: `streamsentry.dll` +
+  `.pdb` and all four test executables.
+- Deployment note (verifier, informational): a perf-instrumented
+  (`PERF_LOG=ON`) `streamsentry.dll` was deployed to
+  `D:\software\obs\obs-studio\obs-plugins\64bit\` on 2026-07-09 21:00 for the
+  owner's soak measurement. Its provenance was not independently verified by
+  the clean run (72704 bytes vs the fresh OFF build's 70144 — consistent with
+  the ON variant).
+
+### Not covered by automation (from the verifier)
+- No runtime performance sample exists: the PERF_LOG stats are verified
+  compile-only; nothing in the run measured tick latency under load.
+- The > 250 ms warning was never triggered (no slow-tick fault injection
+  exists); PID-cache behavior under real process churn / PID reuse is
+  exercised only incidentally (the selftest's notepad), not asserted.
+- The watcher-side TRIGGERS of the empty-monitor-list fallback (real
+  `EnumDisplayMonitors` failure, > 16 monitors, `GetMonitorInfoW` failure)
+  have no automated fixture — verified by inspection and compilation only;
+  the gate-level direction (empty list → mask) is unit-tested.
+- No real toast banner can currently be exercised on this machine, automated
+  or manual; the unit suite covers the gate math against documented metrics
+  and recorded negative fixtures only. OBS was not launched; live
+  multi-monitor / mixed-DPI accuracy remains unit-math only.
+
+### Manual acceptance — STATUS: PENDING (owner's M6 pass; this is now the current checklist)
+Items 1–2 and the deferred block in item 4 are binding acceptance rows for
+the v0.2 ship.
+1. **30-minute streaming soak** with the deployed perf-instrumented DLL
+   (SPEC 2.1 acceptance), busy desktop:
+   - expect ZERO `FAIL-CLOSED engaged: heartbeat stale` lines in the OBS log
+     (the v0.1 field test showed roughly one such blip per minute under
+     streaming load);
+   - from the `PERF watcher tick` log lines, record the tick p99 — target
+     ≤ 50 ms — and the pid-cache hit rate; record the numbers in `reports/`.
+2. **Flyout storm check** (SPEC 2.2 acceptance): open Start search and
+   taskbar panels/flyouts with the filter active → no mass "Notification
+   hidden" plates. Note: the probe shows the shell window taxonomy changed on
+   build 26200.8655 (tray overflow and task switcher now use different window
+   classes than the v0.1 field notes), so re-check the original 2026-07-05
+   storm sources live rather than assuming them.
+3. **Blocklist regression**: a blocklisted window still gets its privacy
+   plate (the gate must not have disturbed block/allowlist fall-through).
+4. **DEFERRED — blocked, not forgotten** (owner ruling 2026-07-09,
+   `reports/M6-toast-probe.txt`): real-toast masking (card up before content
+   is readable), empirical calibration of the PROVISIONAL gate constants, and
+   re-verification of the v0.1 toast signature on Windows build 26200.8655.
+   Blocked until toast banners display on this machine again: banners worked
+   in the 2026-07-05 field test but are system-suppressed as of 2026-07-09 —
+   every notification goes silently to Notification Center, even from senders
+   whose `ToastNotifier.Setting` reports Enabled. These items remain binding
+   for the v0.2 ship.
+   - Diagnostic note for ALL toast testing (this is the note promised by the
+     probe record): banners can be system-suppressed while the machine looks
+     normal (notifications ON, Do Not Disturb OFF). A "toast not masked"
+     result must first be split into **"banner never displayed"** (machine
+     state — check whether the notification landed silently in Notification
+     Center; fire a probe notification) vs **"detection missed it"** (product
+     bug). Only the second is a failure.
+
+### Manual in-OBS checklist — carried items still open after M6
+Unchanged from M5 (steps live in `reports/HUMAN_CHECKLIST.md`): end-to-end
+password-field privacy plate on a real focused field (Chromium fields
+undetected — documented v0.1 limitation; per-browser investigation is
+non-gating v0.2 item 2.6); coordinate landing accuracy on a second monitor /
+different DPI and on a scaled or cropped capture; the full 2-hour endurance
+soak (30 min measured in M3; item 1 above is the separate SPEC-2.1 streaming
+soak); one glance that the filter entry reads **StreamSentry**. The former
+"real single toast with Do Not Disturb OFF" row is absorbed into item 4
+above (same blocker).

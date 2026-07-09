@@ -18,6 +18,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "watcher.h"
 #include "shared-state.h"
+#include "toast-gate.h"
 
 #include <util/base.h> /* LOG_INFO / LOG_WARNING / LOG_ERROR enum */
 
@@ -51,11 +52,17 @@ uint64_t os_gettime_ns(void);
 #include <vector>
 #include <algorithm>
 #include <mutex>
+#include <unordered_map>
 
 /* ---- tunables ------------------------------------------------------- */
 
 /* Enumeration cadence. SPEC: 100-200ms. */
 static const DWORD WATCH_TICK_MS = 150;
+
+/* Early-warning threshold for a slow tick (SPEC 2.1): half the render
+ * side's 500ms fail-closed stale threshold. Always compiled, not just
+ * perf builds — one LOG_WARNING per offending tick. */
+static const uint64_t TICK_WARN_NS = 250000000ULL;
 
 /* Toast signature for this Windows build family. Determined empirically
  * on Windows 11 build 26200 (25H2): a toast banner is a top-level window
@@ -120,6 +127,84 @@ std::wstring proc_image_name(DWORD pid)
 	return to_lower(result);
 }
 
+/* PID -> image-name cache (M6, SPEC 2.1). v0.1 called OpenProcess +
+ * QueryFullProcessImageNameW for EVERY visible window EVERY tick; under
+ * streaming load that is the suspected cause of the rare >500ms ticks
+ * that tripped fail-closed. With the cache, the OS is queried only for
+ * PIDs not observed in the previous tick.
+ *
+ * Owned exclusively by the watcher thread (EnumWindows runs
+ * synchronously on it) — no locking.
+ *
+ * Eviction: any PID not observed for one full tick is erased at the end
+ * of that tick, so after any gap the name is re-queried fresh.
+ *
+ * Residual race, accepted and documented per SPEC 2.1 / the M5
+ * spec-guardian note: if a process exits and Windows reuses its PID for
+ * a NEW process whose window becomes visible within the SAME 150ms
+ * tick-to-tick window (so the PID is never absent for a full tick), one
+ * or more ticks can match against the stale name. In practice the gap
+ * between process exit and a fresh process mapping a visible top-level
+ * window exceeds one tick; title-substring matching (OR semantics,
+ * ruling a434b18) is unaffected either way.
+ *
+ * Failed lookups (empty name, e.g. OpenProcess denied) are deliberately
+ * NOT cached: v0.1 retried those every tick, and caching the failure
+ * would silently drop proc-name matching for that window's lifetime.
+ * The retry cost is bounded to the few windows whose query fails. */
+struct PidCacheEntry {
+	std::wstring name;
+	bool seen_this_tick;
+};
+std::unordered_map<DWORD, PidCacheEntry> g_pid_cache;
+
+#ifdef STREAMSENTRY_PERF_LOG
+uint64_t g_cache_hits = 0, g_cache_misses = 0, g_cache_evictions = 0;
+#endif
+
+std::wstring cached_proc_image_name(DWORD pid)
+{
+	auto it = g_pid_cache.find(pid);
+	if (it != g_pid_cache.end()) {
+		it->second.seen_this_tick = true;
+#ifdef STREAMSENTRY_PERF_LOG
+		g_cache_hits++;
+#endif
+		return it->second.name;
+	}
+	std::wstring name = proc_image_name(pid);
+#ifdef STREAMSENTRY_PERF_LOG
+	g_cache_misses++;
+#endif
+	if (!name.empty()) {
+		PidCacheEntry e;
+		e.name = name;
+		e.seen_this_tick = true;
+		g_pid_cache.emplace(pid, e);
+	}
+	return name;
+}
+
+void pid_cache_begin_tick()
+{
+	for (auto &kv : g_pid_cache)
+		kv.second.seen_this_tick = false;
+}
+
+void pid_cache_end_tick()
+{
+	for (auto it = g_pid_cache.begin(); it != g_pid_cache.end();) {
+		if (!it->second.seen_this_tick) {
+			it = g_pid_cache.erase(it);
+#ifdef STREAMSENTRY_PERF_LOG
+			g_cache_evictions++;
+#endif
+		} else {
+			++it;
+		}
+	}
+}
+
 bool is_cloaked(HWND hwnd)
 {
 	int cloaked = 0;
@@ -129,10 +214,36 @@ bool is_cloaked(HWND hwnd)
 }
 
 /* Collected during a single EnumWindows pass. */
+#define SS_MAX_MONITORS 16
+
 struct EnumCtx {
 	std::vector<ss_shared_rect> rects;
 	std::vector<std::wstring> *blocklist;
+	ss_rect mons[SS_MAX_MONITORS]; /* refreshed each tick for the toast gate */
+	size_t num_mons;
+	bool mons_complete; /* false = truncated or partially resolved */
 };
+
+BOOL CALLBACK mon_enum_proc(HMONITOR hmon, HDC, LPRECT, LPARAM lp)
+{
+	EnumCtx *ctx = reinterpret_cast<EnumCtx *>(lp);
+	if (ctx->num_mons >= SS_MAX_MONITORS) {
+		ctx->mons_complete = false; /* >16 monitors: list truncated */
+		return FALSE;
+	}
+	MONITORINFO mi;
+	mi.cbSize = sizeof(mi);
+	if (GetMonitorInfoW(hmon, &mi)) {
+		ss_rect &r = ctx->mons[ctx->num_mons++];
+		r.x = (double)mi.rcMonitor.left;
+		r.y = (double)mi.rcMonitor.top;
+		r.w = (double)(mi.rcMonitor.right - mi.rcMonitor.left);
+		r.h = (double)(mi.rcMonitor.bottom - mi.rcMonitor.top);
+	} else {
+		ctx->mons_complete = false; /* a monitor we cannot place */
+	}
+	return TRUE;
+}
 
 BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 {
@@ -167,7 +278,7 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 
 	DWORD pid = 0;
 	GetWindowThreadProcessId(hwnd, &pid);
-	std::wstring proc = proc_image_name(pid);
+	std::wstring proc = cached_proc_image_name(pid);
 
 	auto push = [&](ss_rect_kind kind) {
 		ss_shared_rect r;
@@ -179,10 +290,21 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 		ctx->rects.push_back(r);
 	};
 
-	/* Toast: process AND class. */
+	/* Toast: process AND class signature, then the geometry gate
+	 * (M6, SPEC 2.2). Gate-failed windows are NOT dropped — they fall
+	 * through to block/allowlist matching like any other window, the
+	 * gate only removes the toast-card over-masking. With no monitor
+	 * data the gate classifies as toast (over-mask-safe). */
 	if (proc == TOAST_PROC && cls_l == TOAST_CLASS) {
-		push(SS_RECT_TOAST);
-		return TRUE;
+		ss_rect win;
+		win.x = (double)rc.left;
+		win.y = (double)rc.top;
+		win.w = (double)w;
+		win.h = (double)h;
+		if (ss_toast_geom_plausible_any(ctx->mons, ctx->num_mons, &win)) {
+			push(SS_RECT_TOAST);
+			return TRUE;
+		}
 	}
 
 	/* Blocklist: entry matches process image name OR title substring. */
@@ -261,7 +383,20 @@ void publish_tick(EnumCtx &ctx)
 		std::lock_guard<std::mutex> lk(g_cfg_mutex);
 		ctx.blocklist = &g_blocklist;
 		ctx.rects.clear();
+		ctx.num_mons = 0;
+		ctx.mons_complete = true;
+		if (!EnumDisplayMonitors(nullptr, nullptr, mon_enum_proc, reinterpret_cast<LPARAM>(&ctx)) ||
+		    !ctx.mons_complete) {
+			/* Incomplete monitor data must not flip the gate's failure
+			 * direction: a toast on an unlisted monitor would fail the
+			 * overlap test and go UNMASKED. Present the gate with an
+			 * empty list instead — it then classifies every signature
+			 * match as a toast (over-mask, iron rule 1 direction). */
+			ctx.num_mons = 0;
+		}
+		pid_cache_begin_tick();
 		EnumWindows(enum_proc, reinterpret_cast<LPARAM>(&ctx));
+		pid_cache_end_tick();
 	}
 
 	/* Append the current password-field rect, if any. */
@@ -315,26 +450,49 @@ DWORD WINAPI watcher_thread(LPVOID)
 	ctx.rects.reserve(SS_MAX_RECTS);
 
 #ifdef STREAMSENTRY_PERF_LOG
-	uint64_t perf_accum = 0, perf_samples = 0;
+	/* 200-tick window (30s at 150ms): avg + max + p99 per SPEC 2.1. */
+	static uint64_t perf_durs[200];
+	size_t perf_n = 0;
 #endif
 
 	for (;;) {
 		if (InterlockedCompareExchange(&g_killed, 0, 0) == 0) {
-#ifdef STREAMSENTRY_PERF_LOG
 			uint64_t t0 = os_gettime_ns();
-#endif
 			publish_tick(ctx);
+			uint64_t dur = os_gettime_ns() - t0;
+
+			/* Always compiled (SPEC 2.1): a slow tick is the precursor
+			 * of a stale-heartbeat fail-closed; surface it in the OBS
+			 * log while it is still only a near-miss. */
+			if (dur > TICK_WARN_NS)
+				obs_log(LOG_WARNING,
+					"watcher tick took %llu ms (early warning; "
+					"fail-closed stale threshold is 500 ms)",
+					(unsigned long long)(dur / 1000000ULL));
+
 #ifdef STREAMSENTRY_PERF_LOG
-			perf_accum += os_gettime_ns() - t0;
-			if (++perf_samples >= 200) {
-				double avg_ms = (double)perf_accum / (double)perf_samples / 1e6;
+			perf_durs[perf_n++] = dur;
+			if (perf_n >= 200) {
+				uint64_t sorted[200];
+				memcpy(sorted, perf_durs, sizeof(sorted));
+				std::sort(sorted, sorted + 200);
+				uint64_t sum = 0;
+				for (size_t i = 0; i < 200; i++)
+					sum += sorted[i];
+				double avg_ms = (double)sum / 200.0 / 1e6;
+				double p99_ms = (double)sorted[197] / 1e6;
+				double max_ms = (double)sorted[199] / 1e6;
+				uint64_t lookups = g_cache_hits + g_cache_misses;
 				obs_log(LOG_INFO,
-					"PERF watcher tick: avg %.3f ms/tick over %llu ticks "
-					"(~%.2f%% of one core at %lums cadence)",
-					avg_ms, (unsigned long long)perf_samples,
-					avg_ms / (double)WATCH_TICK_MS * 100.0, (unsigned long)WATCH_TICK_MS);
-				perf_accum = 0;
-				perf_samples = 0;
+					"PERF watcher tick: avg %.3f / p99 %.3f / max %.3f ms "
+					"over 200 ticks (~%.2f%% of one core at %lums cadence); "
+					"pid-cache %.1f%% hit (%llu lookups, %llu evictions)",
+					avg_ms, p99_ms, max_ms,
+					avg_ms / (double)WATCH_TICK_MS * 100.0, (unsigned long)WATCH_TICK_MS,
+					lookups ? 100.0 * (double)g_cache_hits / (double)lookups : 0.0,
+					(unsigned long long)lookups, (unsigned long long)g_cache_evictions);
+				perf_n = 0;
+				g_cache_hits = g_cache_misses = g_cache_evictions = 0;
 			}
 #endif
 		}
@@ -380,6 +538,10 @@ void ss_watcher_start(void)
 
 	g_killed = 0;
 	g_stop_event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+	/* SPEC 2.1: thread priority is the approved SECOND lever and only
+	 * after measurement — raise to THREAD_PRIORITY_ABOVE_NORMAL solely
+	 * if tick p99 under streaming load still approaches the 500ms stale
+	 * threshold with the PID-name cache in place. Not applied yet. */
 	g_thread = CreateThread(nullptr, 0, watcher_thread, nullptr, 0, nullptr);
 	if (!g_thread) {
 		obs_log(LOG_ERROR, "watcher: CreateThread failed; detection unavailable "

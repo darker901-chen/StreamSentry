@@ -1,0 +1,109 @@
+StreamSentry M6 toast-geometry probe record — 2026-07-09
+Machine: Windows 11 build 26200.8655 (25H2), single monitor
+Monitor: rect=(0,0,2560,1440) 2560x1440, DPI 96 (100%), work area bottom
+1392 (48px taskbar). All coordinates below are physical pixels captured
+by a per-monitor-DPI-aware-v2 probe process.
+
+== OUTCOME ==
+NO real toast banner rect could be captured: on this machine, in its
+current state, toast BANNERS do not display at all — every notification
+(default, incomingCall, and alarm scenarios; senders confirmed
+Enabled by ToastNotifier.Setting) is delivered silently to the
+Notification Center (owner visually confirmed probes D/E sitting there,
+screenshot 20:23). Banners demonstrably worked on this machine during
+the 2026-07-05 v0.1 field test; the change is between 07-05 and 07-09
+(a Windows update to .8655 landed in that window; a do-not-disturb
+automatic rule is the other suspect — diagnosis stopped here by owner
+ruling, see below).
+
+OWNER RULING (2026-07-09): stop the banner diagnosis, proceed with the
+geometry gate using conservative documented values with generous
+over-mask-safe bounds, marked PROVISIONAL; empirical calibration of the
+constants (and re-verification of the v0.1 toast signature on .8655)
+deferred to the owner's hands-on acceptance pass once banners display
+again. This amends the SPEC 2.2 "verify empirically first" sequencing
+for M6 only; the spec's mitigation conditions (generous bounds,
+full-right-edge band, code-comment safety argument, real-toast
+acceptance row) all remain binding.
+
+== Diagnosis timeline (evidence) ==
+1. Toast fired via PowerShell AUMID -> nothing. Registry showed that
+   sender muted (Notifications\Settings ...powershell.exe Enabled=0).
+2. Fired via a Start-registered exe-path AUMID -> nothing (no toast
+   registration; silent no-op).
+3. Fired via freshly HKCU-registered AUMID (BurntToast technique) ->
+   nothing.
+4. Unfiltered window diff during fire -> NO new window at all: the
+   banner is suppressed before any window is created.
+5. Settings UI (owner screenshots): global notifications ON, do not
+   disturb OFF; per-app list has NO "Windows PowerShell" entry (stale
+   senders with no recent successful post are not listed).
+6. Registry Enabled=1 flip for the PowerShell sender did NOT change
+   ToastNotifier.Setting (still DisabledForApplication) — on this build
+   the legacy registry value is a dead shadow; the authoritative state
+   lives elsewhere (CloudStore). Value reverted to original (0).
+7. ToastNotifier.Setting probe across all Get-StartApps AUMIDs found an
+   Enabled sender (tax software); fired through it: notification
+   accepted (later visible in the center) but still NO banner window.
+8. alarm-scenario toast (loudest banner class available to unpackaged
+   senders) -> also center-only.
+
+== v0.1 signature status on 26200.8655 ==
+- explorer.exe + Xaml_WindowedPopupClass still EXISTS as a class:
+  observed once as a 0x0 PHANTOM (vis=1, cloak=0, rect 0,0,0,0) —
+  matching the v0.1 code comment about phantom popups; the zero-size
+  gate correctly drops these.
+- Whether the REAL banner still uses this signature on .8655 could not
+  be confirmed (no banner displayed). Re-verify at owner acceptance.
+- NOTE: the tray-overflow flyout now uses class
+  TopLevelWindowForOverflowXamlIsland (not Xaml_WindowedPopupClass),
+  and the task switcher uses XamlExplorerHostIslandWindow — the shell's
+  window taxonomy demonstrably changed vs the v0.1 field notes. The
+  2026-07-05 storm sources may present differently on .8655.
+
+== Negative samples captured (owner-driven session, 19:58-20:11) ==
+tray overflow flyout   explorer  TopLevelWindowForOverflowXamlIsland
+                       rect=(2212,1238,2446,1392) size=234x154
+task switcher          explorer  XamlExplorerHostIslandWindow
+                       rect=(0,0,2560,1392) full work area
+classic context menu   explorer  #32768  rect=(2282,1232,2560,1313)
+                       size=278x81 (right-edge anchored!)
+BitComet own popup     BitComet  wxWindowNR rect=(2210,1105,2560,1295)
+                       size=350x190 (right-edge anchored, custom-drawn)
+chrome dropdowns       chrome    Chrome_WidgetWin_1 various small
+LINE app windows       LINE      Qt663QWindowIcon + shadow_* strips
+snip overlay           SnippingTool XamlWindow full screen
+Logi capture overlay   logioptionsplus_agent full screen
+None of these carry the toast signature (proc+class), so none reach the
+geometry gate; they document the local popup fauna. LINE and BitComet
+use custom-drawn popups (NOT Windows toasts) — toast masking cannot and
+does not cover them; the block/allowlist does (documented limitation).
+
+== Product-relevant finding ==
+Toast banners can be system-suppressed while the machine looks normal
+(toggle off, settings on). Consequence for acceptance testing: "toast
+not masked" must first be split into "banner never displayed" vs
+"detection missed it". A diagnostic note goes into TESTING.md's manual
+checklist.
+
+== Provisional gate constants (documented-values basis) ==
+Windows toast banner: fixed-width surface, 396 DIP wide (ToastGeneric),
+height content-dependent (~79 DIP collapsed to ~400 DIP expanded),
+anchored to the right work-area edge (LTR systems), sliding in from the
+right, stacking vertically from the anchor corner. Physical px = DIP x
+scale; supported scales 100-250%.
+Chosen bounds (physical px), generous in the over-mask direction:
+  right-edge band: window right edge >= monitor right - 160
+  horizontal overlap with the monitor required
+  vertical overlap with the monitor required (full-height band: covers
+  top-right and bottom-right anchor variants)
+  width  in [200, 1000] and <= 60% of monitor width
+  height in [60, 1200] and <= 90% of monitor height
+  any uncertainty (no monitors / degenerate geometry) -> classify as
+  toast (mask; over-mask-safe direction)
+Derivations: 396 DIP at 50%..250% scale = 198..990 px -> [200,1000].
+79 DIP collapsed at 100% = 79 px; 60 keeps margin for trimmed banners
+while excluding one-line tooltips (~30-50 px). 160 px edge inset covers
+the observed ~16 DIP inset at up to 250% scale (40 px) with 4x margin
+plus taskbar-side offsets. 60%/90% monitor caps kill full-width and
+full-screen shell surfaces at any DPI.
