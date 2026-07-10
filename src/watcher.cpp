@@ -322,6 +322,17 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 	GetClassNameW(hwnd, cls, 256);
 	std::wstring cls_l = to_lower(cls);
 
+	/* Desktop wallpaper host windows (Progman, WorkerW) are explorer-
+	 * owned, never carry sensitive content, and are always full-screen.
+	 * In allowlist mode masking them blacks the ENTIRE output unless the
+	 * user approves explorer.exe — surprising and near-forced (owner
+	 * field report 2026-07-10). Skip them like the shadow slivers: a
+	 * deterministic, mode-agnostic exclusion of a known-non-sensitive
+	 * shell surface. Real windows and the taskbar are unaffected; the
+	 * toast/blocklist paths never matched these classes anyway. */
+	if (cls_l == L"progman" || cls_l == L"workerw")
+		return TRUE;
+
 	int len = GetWindowTextLengthW(hwnd);
 	std::wstring title;
 	if (len > 0) {
@@ -807,6 +818,14 @@ BOOL CALLBACK pick_enum_proc(HWND hwnd, LPARAM lp)
 	RECT rc;
 	if (!GetWindowRect(hwnd, &rc) || rc.right - rc.left <= 0 || rc.bottom - rc.top <= 0)
 		return TRUE;
+	if (rc.right - rc.left <= 16 || rc.bottom - rc.top <= 16)
+		return TRUE; /* match detection's sliver skip */
+
+	wchar_t pcls[256] = {0};
+	GetClassNameW(hwnd, pcls, 256);
+	std::wstring pcls_l = to_lower(pcls);
+	if (pcls_l == L"progman" || pcls_l == L"workerw")
+		return TRUE; /* match detection's desktop skip */
 
 	DWORD pid = 0;
 	GetWindowThreadProcessId(hwnd, &pid);
