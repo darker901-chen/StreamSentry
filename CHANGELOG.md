@@ -9,6 +9,102 @@ Two unreleased sets live here, newest first: the v0.2 development cycle
 (M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
 Nothing has been pushed or tagged; publishing is a human step.
 
+### 0.2.0-m8 - 2026-07-10
+
+Milestone M8 closes the v0.2 cycle: the **window-picker UI** (SPEC Part 2
+item 2.5 — the last v0.2 feature), the version bump to **0.2.0**, the
+v0.2 README/docs refresh, a fresh packaging dry-run, and the v0.2
+close-out report `reports/V02-FINAL.md`. The change set at the gate is
+9 files; `CMakeLists.txt` is blob-identical to M6.5/M7 — no build-system
+change. Verified by `reports/M8-verifier.md` (Verdict: VERIFIED — clean
+from-scratch 0.2.0 builds with zero compile/link warnings in both
+`STREAMSENTRY_PERF_LOG` variants, tree left OFF; ctest 4/4 suites, same
+four suites and assertion sets as M7; watcher-selftest 11/11
+deterministic legs pass including the new picker-enumeration leg, toast
+leg INCONCLUSIVE as documented since M2; fresh packaging dry-run whose
+zip layout matches the README verbatim with a byte-identical,
+PERF-string-free DLL; `release/` git-ignored) and
+`reports/M8-spec-guardian.md` (Verdict: PASS — no violations; conditional
+on this CHANGELOG entry and the TESTING.md M8 note landing in the
+milestone commit, which they do, and on the guardian report being staged
+in it). After both gates, one doc-only change was applied per the
+guardian's own non-blocking observation O1: README install step 2
+rewritten to describe the plugin-folder install and the manual copy
+mapping — same verified zip layout, clearer wording; no code changed
+after the verification run.
+
+#### Added
+- **Window picker** (SPEC 2.5): three new properties in the filter
+  dialog — an **Open windows** dropdown (pre-filled when the dialog
+  opens) listing current on-screen windows as "process - title",
+  deduplicated by process; **Refresh window list** (re-enumerates); and
+  **Add selected window to the active list**, which appends the selected
+  process name to whichever list the current mode uses (allowlist in
+  allowlist mode, otherwise blocklist). Appends are line-deduplicated
+  (case-insensitive, per-line trimmed, LF/CR/CRLF-safe), so adding the
+  same selection twice does not duplicate the entry; the multiline
+  textbox remains for power users (removals, title-substring entries)
+  and the picker only ever appends. Stock `obs_properties_*` widgets
+  only — no Qt (iron rule 4).
+- Picker enumeration API `ss_enum_open_windows`
+  (`src/watcher.cpp`/`.h`): a one-shot `EnumWindows` on the calling (UI)
+  thread with the same visibility/cloak gates as detection; a window
+  whose cloak state cannot be determined is excluded from the UI list —
+  the mask-more direction: what cannot be picked cannot be approved, so
+  in allowlist mode it stays masked. It writes only the caller-supplied
+  buffer — no locks, no shared state, no heartbeat, no contact with the
+  watcher-thread-only PID cache — and the guardian confirmed it cannot
+  weaken any masking path; detection and render code are untouched by
+  the diff.
+- `watcher-selftest` picker leg: every enumerated entry must carry a
+  process name and no process may appear twice (the verification run
+  saw 7 distinct processes).
+- Three locale strings (PickerWindow, PickerRefresh, PickerAdd).
+- `reports/V02-FINAL.md`: the v0.2 close-out report — milestone/commit
+  table, per-milestone gate verdicts, the gate-catch index, test
+  totals, and the open owner-acceptance items. The guardian
+  spot-checked its claims against the repo (git log, cited reports,
+  GATE-CATCHES count, the 55-assert figure).
+
+#### Changed
+- Version 0.1.0 → 0.2.0 (`buildspec.json`); the CMake project version
+  and the DLL resource (FileVersion/ProductVersion) follow. Package:
+  `streamsentry-0.2.0-windows-x64.zip`, packaging dry-run verified —
+  exactly `streamsentry/bin/64bit/streamsentry.dll` + `.pdb` and
+  `streamsentry/data/locale/en-US.ini`, with the zipped DLL
+  byte-identical to the final `PERF_LOG=OFF` build.
+- README refreshed to v0.2: status line; Masking-mode / allowlist /
+  picker / panic usage; the custom-popup-apps limitation (LINE, BitComet
+  and similar draw their own popup notifications that toast masking
+  cannot see — cover them via the block/allowlist instead); roadmap
+  trimmed to unshipped items with window-capture geometry named the top
+  v0.3 candidate; and (post-gate, per guardian O1) the rewritten
+  install step 2.
+- `ARCHITECTURE.md`: as-built record extended through M8 (picker rows,
+  including the disclosed CLOAK_UNKNOWN picker exclusion).
+
+#### Dependencies
+- Unchanged: libobs + Windows SDK only. The picker uses stock libobs
+  properties APIs and existing Win32 calls; `CMakeLists.txt` is
+  blob-identical to M6.5/M7 (verifier-pinned — no build-system change).
+
+#### Pending owner acceptance (binding for the v0.2 ship)
+- The in-OBS picker rows (SPEC 2.5 acceptance + the "Picker: add open
+  window, no typing" matrix row): combo populated in the real dialog, a
+  picker-only add updating the active mode's list and the on-screen
+  masking, no duplicate on double-add, refresh re-scan, and the
+  allowlist routing — libobs UI callbacks have no automated harness.
+  Plus a rendered-README accuracy glance (install + usage).
+- Everything carried in the M6.5/M7 checklists — the 30-minute streaming
+  soak and v0.2 perf re-measurement on the deployed M8 perf build
+  (refreshed 2026-07-10 16:53), the allowlist/panic rows, the ruling
+  countersigns — and the BLOCKED real-toast rows (toast banners still
+  system-suppressed on the dev machine). TESTING.md (M8) holds the
+  combined final checklist.
+
+v0.2 closes with this entry — the consolidated evidence index and
+close-out record is `reports/V02-FINAL.md`.
+
 ### 0.2.0-m7 - 2026-07-10
 
 Milestone M7 delivers the two v0.2 protection-mode features: **allowlist

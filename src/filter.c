@@ -22,6 +22,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <util/threading.h>
 #include <graphics/vec4.h>
 
+#include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "filter.h"
@@ -170,6 +172,96 @@ static void filter_destroy(void *data)
 	bfree(f);
 }
 
+/* ---- window picker (M8, SPEC 2.5) ------------------------------------ */
+
+/* Case-insensitive "is this exact line already in the multiline list". */
+static bool list_has_line(const char *text, const char *line)
+{
+	if (!text || !line || !*line)
+		return false;
+	size_t line_len = strlen(line);
+	const char *p = text;
+	while (*p) {
+		const char *end = p;
+		while (*end && *end != '\n' && *end != '\r')
+			end++;
+		/* trim */
+		const char *b = p;
+		const char *e = end;
+		while (b < e && (*b == ' ' || *b == '\t'))
+			b++;
+		while (e > b && (e[-1] == ' ' || e[-1] == '\t'))
+			e--;
+		if ((size_t)(e - b) == line_len) {
+			size_t i;
+			for (i = 0; i < line_len; i++) {
+				if (tolower((unsigned char)b[i]) != tolower((unsigned char)line[i]))
+					break;
+			}
+			if (i == line_len)
+				return true;
+		}
+		p = (*end) ? end + 1 : end;
+	}
+	return false;
+}
+
+static void picker_fill_combo(obs_property_t *combo)
+{
+	obs_property_list_clear(combo);
+	struct ss_open_window wins[SS_MAX_RECTS];
+	size_t n = ss_enum_open_windows(wins, SS_MAX_RECTS);
+	for (size_t i = 0; i < n; i++) {
+		char label[200];
+		snprintf(label, sizeof(label), "%s%s%s", wins[i].proc, wins[i].title[0] ? " - " : "",
+			 wins[i].title);
+		obs_property_list_add_string(combo, label, wins[i].proc);
+	}
+}
+
+static bool picker_refresh_clicked(obs_properties_t *props, obs_property_t *p, void *data)
+{
+	UNUSED_PARAMETER(p);
+	UNUSED_PARAMETER(data);
+	obs_property_t *combo = obs_properties_get(props, "picker_window");
+	if (combo)
+		picker_fill_combo(combo);
+	return true;
+}
+
+/* Append the selected process name to the ACTIVE mode's list (SPEC
+ * 2.5): no hand-typing, duplicates are not added twice, the textbox
+ * stays for power users. */
+static bool picker_add_clicked(obs_properties_t *props, obs_property_t *p, void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(p);
+	struct ss_filter *f = data;
+	if (!f)
+		return false;
+
+	obs_data_t *settings = obs_source_get_settings(f->source);
+	const char *proc = obs_data_get_string(settings, "picker_window");
+	if (proc && *proc) {
+		const char *key = (strcmp(obs_data_get_string(settings, "mode"), "allowlist") == 0) ? "allowlist"
+													: "blocklist";
+		const char *cur = obs_data_get_string(settings, key);
+		if (!list_has_line(cur, proc)) {
+			size_t need = strlen(cur) + strlen(proc) + 2;
+			char *joined = bmalloc(need);
+			if (cur[0])
+				snprintf(joined, need, "%s\n%s", cur, proc);
+			else
+				snprintf(joined, need, "%s", proc);
+			obs_data_set_string(settings, key, joined);
+			bfree(joined);
+			obs_source_update(f->source, settings);
+		}
+	}
+	obs_data_release(settings);
+	return true; /* refresh so the textbox shows the appended line */
+}
+
 /* Show only the active mode's list (SPEC 2.3: separate storage — a
  * mode switch must never reinterpret one list as the other). */
 static bool mode_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
@@ -204,6 +296,15 @@ static obs_properties_t *filter_get_properties(void *data)
 	obs_property_t *al =
 		obs_properties_add_text(props, "allowlist", obs_module_text("Allowlist"), OBS_TEXT_MULTILINE);
 	obs_property_set_long_description(al, obs_module_text("AllowlistHint"));
+
+	/* Window picker (M8, SPEC 2.5): pre-filled on dialog open; the
+	 * refresh button re-enumerates; add appends to the ACTIVE list. */
+	obs_property_t *combo = obs_properties_add_list(props, "picker_window", obs_module_text("PickerWindow"),
+							OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	picker_fill_combo(combo);
+	obs_properties_add_button(props, "picker_refresh", obs_module_text("PickerRefresh"),
+				  picker_refresh_clicked);
+	obs_properties_add_button2(props, "picker_add", obs_module_text("PickerAdd"), picker_add_clicked, data);
 	return props;
 }
 

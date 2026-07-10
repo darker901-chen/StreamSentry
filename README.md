@@ -6,9 +6,11 @@ accidents *before* they reach your capture — and clearly tells you
 (with an on-output status chip) whenever it cannot verify it is
 protecting you. It never interrupts your stream.
 
-> Status: **v0.1, pre-release.** The detection and masking pipeline is
-> built and machine-tested; several real-device checks are still a manual
-> pass (see [Limitations](#limitations) and `reports/HUMAN_CHECKLIST.md`).
+> Status: **v0.2, pre-release.** Machine-verified (4 unit-test suites +
+> live watcher self-test, every milestone gated by an independent build
+> verifier and a spec audit); several real-device checks remain a manual
+> pass (see [Limitations](#limitations) and the checklist in
+> `TESTING.md`).
 
 ## The problem
 
@@ -60,11 +62,16 @@ tools. Opaque is the only honest guarantee.
 
 ## Install
 
-1. Download `streamsentry-0.1.0-windows-x64.zip` from the Releases page.
-2. Extract it into your OBS Studio folder so that `streamsentry.dll` lands
-   in `obs-plugins\64bit\` and the `data\obs-plugins\streamsentry\` folder
-   is alongside OBS's other plugin data. (The zip mirrors OBS's layout:
-   `streamsentry/bin/64bit/…` and `streamsentry/data/…`.)
+1. Download `streamsentry-0.2.0-windows-x64.zip` from the Releases page.
+   It contains one folder, `streamsentry\`, laid out as a self-contained
+   OBS plugin (`bin\64bit\streamsentry.dll` + `data\locale\...`).
+2. Install it either way:
+   - **Plugin folder (recommended, OBS 28+):** extract the `streamsentry`
+     folder into `%ProgramData%\obs-studio\plugins\` (create `plugins` if
+     it does not exist).
+   - **Into the OBS install directory:** copy
+     `streamsentry\bin\64bit\*` into `obs-studio\obs-plugins\64bit\` and
+     `streamsentry\data\*` into `obs-studio\data\obs-plugins\streamsentry\`.
 3. Restart OBS. Confirm `obs-studio\...\logs` shows
    `[streamsentry] plugin loaded successfully`.
 
@@ -73,26 +80,45 @@ for locally-built, unsigned binaries.
 
 ## Usage
 
-1. Add a **Display Capture** source (this is the source type v0.1
-   supports for coordinate mapping — see Limitations).
+1. Add a **Display Capture** source (the source type supported for
+   coordinate mapping — see Limitations).
 2. Right-click it → **Filters** → under **Effect Filters** add
    **StreamSentry**.
 3. Settings:
    - **Enable** — turns the whole filter on/off.
-   - **Blocklist** — one process name or window-title substring per line
-     (case-insensitive). Matching windows are covered with a privacy
-     plate. Pre-filled with sensible defaults (password managers and
-     credential dialogs). Leave a line empty / clear the box to fall back
-     to the built-in defaults.
+   - **Masking mode** (v0.2):
+     - **Blocklist** (default) — mask only the windows you list.
+     - **Allowlist** — mask **everything except** the windows you list.
+       Default-deny: an empty allowlist masks the whole screen
+       (including the taskbar and wallpaper) until you approve things.
+       This is the structural answer to "the thing I never thought to
+       blocklist" — nothing shows unless you said so.
+   - **Blocklist / Allowlist** — one process name or window-title
+     substring per line (case-insensitive). The blocklist comes
+     pre-filled with sensible defaults (password managers and
+     credential dialogs; clearing it restores them). The allowlist
+     starts empty on purpose. The two lists are stored separately —
+     switching modes never reinterprets one as the other.
+   - **Window picker** (v0.2) — the *Open windows* dropdown lists what
+     is currently on screen as "process — title". Pick one, press *Add
+     selected window to the active list*, and it lands in whichever
+     list your current mode uses. No more guessing process names.
+     *Refresh window list* re-scans. Duplicates are not added twice.
    - There is deliberately **no** option to disable the "protection
      degraded" status chip.
+4. **Panic hotkey** (v0.2): bind "StreamSentry: mask everything
+   (panic)" under OBS **Settings → Hotkeys**. Press once → the entire
+   source is replaced by an opaque privacy plate on the next frame;
+   press again → back to normal. Not persisted: a fresh OBS session
+   always starts un-panicked.
 
 Toast masking and password-field masking are always on while the filter
-is enabled; they need no configuration.
+is enabled, in both modes — approving a process in the allowlist does
+NOT exempt its notification toasts.
 
 ## Limitations
 
-StreamSentry is honest about what it does not do. In v0.1:
+StreamSentry is honest about what it does not do. As of v0.2:
 
 - **Masking works on unscaled full-monitor Display Capture.** A
   **Window Capture**, a scaled/cropped capture, or two monitors of
@@ -108,6 +134,10 @@ StreamSentry is honest about what it does not do. In v0.1:
 - **UAC / credential prompts on the secure desktop** are not capturable by
   OBS at all, so they cannot appear in your stream to begin with (the
   credential broker on the normal desktop *is* covered by the blocklist).
+- **Apps that draw their own popup notifications** (LINE, BitComet,
+  many Electron apps) do not use Windows toasts, so toast masking
+  cannot see them — cover the app with the blocklist (or leave it off
+  your allowlist) instead.
 - **Custom-drawn UIs** (some Electron apps, games) may not expose the UIA
   password property; cover those with the blocklist instead.
 - **Chromium browsers** enable their accessibility tree on demand; verify
@@ -121,19 +151,21 @@ StreamSentry is honest about what it does not do. In v0.1:
   screen) is impossible to do deterministically and is **permanently out
   of scope** — StreamSentry masks *windows and fields*, not arbitrary
   text.
-- **UI is English-only** (localization is out of scope for v0.1).
+- **UI is English-only** (localization is out of scope).
 
-Performance measured on the reference machine: watcher thread ~0.55% of
-one core, added render cost ~0.03 µs/frame. A 30-minute soak showed a
-stable working set; the SPEC's 2-hour endurance target is a manual check.
+Performance measured on the reference machine (v0.1 baseline): watcher
+thread ~0.55% of one core, added render cost ~0.03 µs/frame; v0.2 adds
+a PID-name cache to remove the per-window process queries that caused
+rare heartbeat stalls under streaming load (re-measurement is on the
+acceptance checklist).
 
-## Roadmap (not in v0.1)
+## Roadmap (not in v0.2)
 
-Deliberately deferred: **allowlist mode** (only approved windows visible —
-the planned v0.2 headline), Focus Assist / Do-Not-Disturb auto-integration
-(v0.2), window-capture geometry, macOS support, per-app policies. Never
-planned: blur/mosaic options, AI detection, content secret scanning, a
-tray icon, auto-update.
+Deliberately deferred: window-capture geometry support (the top
+candidate for v0.3 — masks on Window Capture sources instead of the
+degraded chip), Focus Assist / Do-Not-Disturb auto-integration, macOS
+support, per-app policies. Never planned: blur/mosaic options, AI
+detection, content secret scanning, a tray icon, auto-update.
 
 ## Building from source
 

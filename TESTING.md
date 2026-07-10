@@ -771,7 +771,7 @@ frame-decide; SPEC.md "protection-inactive" adjectives updated to
   faithfully captures the owner's decision — that attestation is the
   owner's, at acceptance (item 6 below).
 
-### Manual acceptance — STATUS: PENDING (owner's pass; still current — the M7 section below ADDS the allowlist/panic items; run both)
+### Manual acceptance — STATUS: PENDING (owner's pass; still current — the M7 and M8 sections below ADD items; run all three lists)
 Items 1–3 and 6 are new or changed by M6.5; items 4–5 and 7–8 carry forward.
 Steps for the carried v0.1 items live in `reports/HUMAN_CHECKLIST.md`.
 1. **Degraded-chip check** — REPLACES the v0.1 "kill watcher (fault
@@ -985,7 +985,7 @@ case 6 indexes the catch.
 - Multi-instance last-writer-wins mode/list semantics: documented in
   watcher.h, not exercised by automation.
 
-### Manual acceptance — STATUS: PENDING (owner's M7 pass; ADDS to the M6.5 checklist above — both lists are current)
+### Manual acceptance — STATUS: PENDING (owner's M7 pass; ADDS to the M6.5 checklist above — both lists are current; the M8 section below adds the final v0.2 items)
 Items 1–5 are the SPEC v0.2 acceptance rows for 2.3/2.4; item 6 is blocked;
 items 7–8 are the residual/countersign records required by the guardian's
 round-2 PASS.
@@ -1036,3 +1036,192 @@ round-2 PASS.
      while disabled); direction recorded in the guardian report, round 2.
 9. **Carried**: everything in the M6.5 checklist above (items 1–8) remains
    open and current — M7 adds items rather than replacing any.
+
+---
+
+## M8 — 2026-07-10 — Window picker + docs/package refresh (SPEC Part 2 item 2.5; v0.2 FINAL)
+
+### What was built
+- **Window picker** (SPEC 2.5, the last v0.2 feature; `src/filter.c`):
+  three new filter properties — an **Open windows** dropdown, pre-filled
+  when the properties dialog opens, listing current on-screen windows as
+  "process - title" (deduplicated by process; the combo item's value is
+  the lowercase process image name); a **Refresh window list** button
+  that re-enumerates; and an **Add selected window to the active list**
+  button that appends the selected process name to whichever list the
+  current mode uses ("allowlist" iff Mode = Allowlist, else
+  "blocklist"). Appends are line-deduplicated (case-insensitive,
+  per-line trimmed, LF/CR/CRLF-safe), so adding the same selection twice
+  does not duplicate the entry. The multiline textbox stays for power
+  users (removals, title-substring entries); the picker only ever
+  appends — it never removes or reformats existing lines. Stock
+  `obs_properties_*` widgets only — no Qt, no custom UI (iron rule 4).
+- **Picker enumeration API** (`ss_enum_open_windows`,
+  `src/watcher.cpp`/`.h`): a one-shot `EnumWindows` on the calling (UI)
+  thread using the same visibility/cloak gates as detection (visible,
+  non-cloaked, non-degenerate rect). A window whose cloak state cannot
+  be determined (CLOAK_UNKNOWN) is EXCLUDED from the UI list — stricter
+  than detection, in the mask-more direction: what cannot be picked
+  cannot be approved, so in allowlist mode it stays masked. The guardian
+  confirmed the function cannot weaken any masking path: it writes only
+  the caller-supplied buffer, takes no locks, and never touches shared
+  state, the heartbeat, or the watcher-thread-only PID cache; detection
+  and render code are byte-untouched by this diff.
+- **Version bump 0.1.0 → 0.2.0** (`buildspec.json`) — the only
+  build-input change; `CMakeLists.txt` is blob-identical to M6.5/M7
+  (verifier-pinned).
+- **Docs/package refresh**: README rewritten to v0.2 — status line;
+  Masking-mode / allowlist / picker / panic usage; the custom-popup-apps
+  limitation (LINE, BitComet and similar draw their own popup
+  notifications that toast masking cannot see — cover them via the
+  block/allowlist instead); roadmap trimmed to unshipped items only,
+  with window-capture geometry named the top v0.3 candidate; zip name
+  `streamsentry-0.2.0-windows-x64.zip`. `ARCHITECTURE.md` updated
+  "through M8" (picker rows). `data/locale/en-US.ini` +3 strings
+  (PickerWindow, PickerRefresh, PickerAdd). `reports/V02-FINAL.md`
+  added — the v0.2 close-out report (the guardian spot-checked its
+  milestone/commit table, gate verdicts, GATE-CATCHES count, and
+  55-assert claim against the repo).
+- **Tests**: `watcher-selftest` gained the M8 picker leg — every
+  enumerated entry must carry a process name and no process may appear
+  twice; the observed count is logged.
+
+### Automated evidence
+Sources: `reports/M8-verifier.md` (Verdict: VERIFIED — one clean
+from-scratch run against the staged 9-file diff at HEAD 706cda1, all
+nine staged files pinned by blob hash, zero unstaged changes) and
+`reports/M8-spec-guardian.md` (Verdict: PASS — no violations;
+conditional on C1/C2, next subsection), both 2026-07-10.
+- Commands (verbatim from the report):
+  ```
+  rm -rf F:/obsplugin/build_x64
+  cmake --preset windows-x64-local
+  cmake --build --preset windows-x64-local
+  cmake --preset windows-x64-local -DSTREAMSENTRY_PERF_LOG=ON
+  cmake --build --preset windows-x64-local
+  cmake --preset windows-x64-local -DSTREAMSENTRY_PERF_LOG=OFF
+  cmake --build --preset windows-x64-local
+  ctest -C RelWithDebInfo --output-on-failure          # cwd: F:/obsplugin/build_x64
+  ./coord-map-tests.exe; ./plate-gen-tests.exe; ./toast-gate-tests.exe; ./frame-decide-tests.exe
+  ./watcher-selftest.exe                               # cwd: build_x64/RelWithDebInfo
+  rm -rf F:/obsplugin/release
+  cmake --install F:/obsplugin/build_x64 --prefix F:\obsplugin\release\RelWithDebInfo --config RelWithDebInfo
+  powershell Compress-Archive -Path streamsentry -DestinationPath F:\obsplugin\release\streamsentry-0.2.0-windows-x64.zip -Force
+  ```
+- Results (2026-07-10 16:55–17:05): every configure/build exit 0 with
+  zero warning/error lines in every compile/link log, in both
+  `STREAMSENTRY_PERF_LOG` variants, tree left OFF — the shipping
+  configuration. The only warnings anywhere are the two known
+  pre-existing configure warnings from the vendored OBS sources in
+  `.deps` (FindDetours version / virtualcam GUID) — out-of-tree,
+  unchanged since M4.
+- Version is 0.2.0 at every layer: `buildspec.json`, `CMakeCache.txt`
+  (`CMAKE_PROJECT_VERSION`), and the built DLL's resource
+  (FileVersion/ProductVersion 0.2.0, Product streamsentry).
+- ctest 4/4 suites PASS (coord-map, plate-gen, toast-gate,
+  frame-decide); each executable also run directly, "all passed",
+  exit 0. The verifier records static CHECK-site counts of
+  36 + 25 + 24 + 56 = 141; the M7 note's 137 figure counted assertion
+  invocations (per the guardian, frame-decide's 56 `CHECK(` sites = 55
+  asserts + the macro definition line), and none of the four suite
+  source files is touched by the M8 diff.
+- `watcher-selftest.exe` exit 0 — **11/11 deterministic legs ok**,
+  including the NEW picker leg "picker enumerates open windows (deduped,
+  named)" (info line: 7 distinct processes seen). The toast leg is
+  INCONCLUSIVE — expected: banners are still system-suppressed on this
+  machine (`reports/M6-toast-probe.txt`); the same documented outcome as
+  M2–M7, not a regression. Cleanup verified: no notepad processes left
+  after the run.
+- **Packaging dry-run — fresh**: the prior `release/` tree was deleted
+  first; `cmake --install` exit 0; the installed tree and the recreated
+  `release\streamsentry-0.2.0-windows-x64.zip` contain exactly
+  `streamsentry/bin/64bit/streamsentry.dll` + `.pdb` and
+  `streamsentry/data/locale/en-US.ini` — nothing extra. The zipped DLL
+  is byte-identical to the final PERF_LOG=OFF build (SHA256
+  `51273c1a220e0a18b7190fc15f9fcef143f155503037517cefdeca29c78564b4`)
+  and contains zero "PERF watcher tick" strings — the OFF variant
+  ships. README's zip name and layout description match the actual zip
+  verbatim; `release/` is git-ignored and absent from `git status`.
+- Deployment note (verifier, informational — not a pass/fail item): the
+  owner's OBS at `D:\software\obs\obs-studio` carries an M8 **perf**
+  build (PERF_LOG=ON variant, ProductVersion 0.2.0, deployed 2026-07-10
+  16:53) plus a byte-identical locale file. This is intentionally NOT
+  the release-zip DLL — it is there for the owner's v0.2 perf
+  re-measurement (the soak row carried below).
+
+### Gate conditions and post-gate doc-only change
+- The guardian's PASS is conditional: **C1** — this TESTING.md M8 note
+  and the CHANGELOG 0.2.0-m8 entry must land in the M8 milestone commit
+  (**this section and that entry fulfill C1**); **C2** — the guardian
+  report itself staged into the same commit (handled at commit
+  assembly).
+- After both gates, ONE doc-only change was applied, taken from the
+  guardian's own non-blocking observation O1: README install step 2 was
+  rewritten to describe the plugin-folder install
+  (`%ProgramData%\obs-studio\plugins\`, recommended) and the manual copy
+  mapping into the OBS install directory. Same zip, same verified
+  layout — wording only; no code changed after the verification run.
+- The guardian recorded five further cosmetic observations (O2–O6 in
+  `reports/M8-spec-guardian.md` §9), none blocking — e.g. over-long
+  window titles show as process-only combo entries; the picker lists at
+  most 64 distinct processes (the textbox covers the rest);
+  CLOAK_UNKNOWN windows never appear in the picker, so approving one
+  requires typing (mask-more direction, disclosed in ARCHITECTURE.md).
+
+### Not covered by automation (from the verifier)
+- **In-OBS picker UI behavior**: the combo populating inside the real
+  properties dialog, "Add selected window to the active list" appending
+  to the correct list, no-duplicate on double-add, refresh re-scan, and
+  a mask appearing after a picker-only add. No automated test exercises
+  libobs UI callbacks (the picker buttons) — code-reviewed +
+  owner-manual only (items 1–2 below).
+- **README accuracy as rendered** (install/usage walkthrough against the
+  real UI) — owner-manual (item 3 below).
+- Real toast masking end-to-end (self-test leg INCONCLUSIVE under system
+  suppression), the SPEC manual-matrix allowlist/panic/mode-switch
+  rows, multi-monitor/DPI cases, and the v0.2 perf re-measurement on
+  the deployed perf build — all owner-manual, carried in the M6.5/M7
+  checklists above.
+
+### Manual acceptance — STATUS: PENDING (owner's M8 + final v0.2 pass; ADDS to the M6.5 and M7 checklists above — all three lists are current)
+M8 is the last v0.2 milestone: items 1–3 below plus the still-open M6.5
+items 1–8 and M7 items 1–9 together form the FINAL v0.2 checklist the
+owner runs before pushing/tagging/releasing (`reports/V02-FINAL.md` is
+the close-out index).
+1. **Picker: add open window, no typing** (SPEC 2.5 acceptance + the
+   SPEC manual-matrix row "Picker: add open window, no typing"): open
+   the filter's properties → the **Open windows** dropdown is already
+   populated, entries reading "process - title" (a few entries may show
+   the process name only — the documented over-long-title cosmetic
+   limit). Select one, press **Add selected window to the active
+   list** → the process name appears as a new line in the ACTIVE mode's
+   textbox and masking updates on screen (in blocklist mode the added
+   app's window gains a privacy plate). Press Add again with the same
+   selection → NO duplicate line. Open a new app, press **Refresh window
+   list** → the new app appears in the dropdown.
+2. **Picker routes to the allowlist** (the same SPEC 2.5 acceptance in
+   allowlist mode — add an open window without typing): switch
+   Mode = Allowlist and repeat the Add → the line lands in the ALLOWLIST
+   textbox (not the blocklist) and the approved app's window unmasks
+   while everything else stays plated.
+3. **README rendered-accuracy glance**: read the rendered README against
+   the real UI — the install steps (both variants: plugin-folder install
+   and the OBS-install-directory copy; this also checks the post-gate
+   step-2 rewording) and the Usage walkthrough (mode dropdown, list
+   textboxes, picker controls, panic hotkey). Nothing may describe a
+   control or behavior that does not exist.
+4. **Carried — the rest of the final v0.2 checklist** (nothing new;
+   listed so nothing is lost):
+   - M6.5 items 1–8, including the 30-minute streaming soak with
+     tick-p99 recording — run it on the deployed M8 perf build
+     (refreshed 2026-07-10 16:53); record the numbers in `reports/` —
+     and the ruling-addendum countersigns.
+   - M7 items 1–9 (allowlist rows, panic rows, Q1–Q3 countersigns).
+   - The BLOCKED real-toast rows stay BLOCKED (M6.5 item 7, M7 item 6):
+     real toast masked before content is readable, empirical calibration
+     of the PROVISIONAL gate constants, re-verification of the v0.1
+     toast signature on build 26200.8655, and the allowlist
+     toast-exemption row — all still blocked while toast banners are
+     system-suppressed on this machine; the M6 diagnostic note (split
+     "banner never displayed" from "detection missed it") applies
+     unchanged.

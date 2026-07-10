@@ -761,6 +761,94 @@ const char *ss_watcher_default_blocklist_text(void)
 	return text.c_str();
 }
 
+/* M8 picker enumeration. UI-thread one-shot: plain proc_image_name
+ * queries (the PID cache is watcher-thread-only), same gates as
+ * enum_proc minus the matching. Dedupe by process name; a later
+ * window's non-empty title upgrades an entry that had none. */
+namespace {
+
+struct PickCtx {
+	ss_open_window *out;
+	size_t max;
+	size_t count;
+};
+
+void utf16_to_utf8(const std::wstring &w, char *dst, size_t dst_size)
+{
+	dst[0] = '\0';
+	if (w.empty() || dst_size == 0)
+		return;
+	int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, dst, (int)dst_size - 1, nullptr, nullptr);
+	if (n <= 0)
+		dst[0] = '\0';
+	else
+		dst[dst_size - 1] = '\0';
+}
+
+BOOL CALLBACK pick_enum_proc(HWND hwnd, LPARAM lp)
+{
+	PickCtx *ctx = reinterpret_cast<PickCtx *>(lp);
+	if (ctx->count >= ctx->max)
+		return FALSE;
+
+	if (!IsWindowVisible(hwnd))
+		return TRUE;
+	if (cloak_state(hwnd) != CLOAK_NO)
+		return TRUE; /* UI list: only confidently displayed windows */
+
+	RECT rc;
+	if (!GetWindowRect(hwnd, &rc) || rc.right - rc.left <= 0 || rc.bottom - rc.top <= 0)
+		return TRUE;
+
+	DWORD pid = 0;
+	GetWindowThreadProcessId(hwnd, &pid);
+	std::wstring proc = proc_image_name(pid);
+	if (proc.empty())
+		return TRUE;
+
+	int len = GetWindowTextLengthW(hwnd);
+	std::wstring title;
+	if (len > 0) {
+		title.resize(len + 1);
+		int got = GetWindowTextW(hwnd, &title[0], len + 1);
+		title.resize(got < 0 ? 0 : got);
+	}
+
+	char proc8[64];
+	utf16_to_utf8(proc, proc8, sizeof(proc8));
+	if (!proc8[0])
+		return TRUE;
+
+	/* dedupe by process name */
+	for (size_t i = 0; i < ctx->count; i++) {
+		if (strcmp(ctx->out[i].proc, proc8) == 0) {
+			if (!ctx->out[i].title[0] && !title.empty())
+				utf16_to_utf8(title, ctx->out[i].title, sizeof(ctx->out[i].title));
+			return TRUE;
+		}
+	}
+
+	ss_open_window &w = ctx->out[ctx->count++];
+	memset(&w, 0, sizeof(w));
+	memcpy(w.proc, proc8, strlen(proc8));
+	utf16_to_utf8(title, w.title, sizeof(w.title));
+	return TRUE;
+}
+
+} // namespace
+
+size_t ss_enum_open_windows(struct ss_open_window *out, size_t max_count)
+{
+	if (!out || max_count == 0)
+		return 0;
+	PickCtx ctx;
+	ctx.out = out;
+	ctx.max = max_count;
+	ctx.count = 0;
+	EnumWindows(pick_enum_proc, reinterpret_cast<LPARAM>(&ctx));
+	return ctx.count;
+}
+
 void ss_watcher_debug_set_killed(bool killed)
 {
 	InterlockedExchange(&g_killed, killed ? 1 : 0);

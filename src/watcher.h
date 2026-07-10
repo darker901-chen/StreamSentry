@@ -56,6 +56,17 @@ void ss_watcher_set_allowlist(const char *multiline_utf8);
  * pre-filling the settings box. Points to static storage. */
 const char *ss_watcher_default_blocklist_text(void);
 
+/* M8 picker support (SPEC 2.5): one-shot enumeration of currently
+ * visible top-level windows, using the same visibility/cloak gates as
+ * detection, deduplicated by process image name. Runs on the calling
+ * thread (UI); independent of the watcher thread and its caches.
+ * Returns the number of entries written (at most max_count). */
+struct ss_open_window {
+	char proc[64];   /* lowercase process image name, UTF-8 */
+	char title[128]; /* a representative window title, UTF-8; may be empty */
+};
+size_t ss_enum_open_windows(struct ss_open_window *out, size_t max_count);
+
 /* M2 fault-injection hook (developer-only, for the degraded-render test):
  * when killed, the watcher loop stops publishing AND stops updating the
  * heartbeat, exactly as a dead thread would look to the render side,

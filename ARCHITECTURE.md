@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 through M7)
+# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 through M8)
 
 This documents the plugin **as actually built**, not aspirations —
 v0.1 as shipped at M4, the M6 hardening changes (marked "M6"), and the
@@ -21,7 +21,7 @@ implementation satisfies them.
 | [src/plate-gen.c](src/plate-gen.c) / .h | Pure C, no OBS, no Windows | CPU generator for mask visuals (RGBA8888): toast card, privacy plate, failure status chip. Opacity (iron rule 3) is a *tested property*: `ss_image_opaque_inside()` + `ss_plate_max_corner_inset()` let unit tests prove every pixel inside the corner inset is alpha-255. |
 | [src/toast-gate.c](src/toast-gate.c) / .h (M6) | Pure C, no OBS, no Windows | Toast geometry gate (SPEC 2.2): right-edge spawn band + generous size envelope, evaluated per monitor. Applied *after* the process+class signature; only removes toast-card over-masking. M6.5: uncertainty (no monitors, degenerate input) classifies as NOT a toast — mask only on confidence (SPEC 2.7). Constants are PROVISIONAL documented-metrics values (reports/M6-toast-probe.txt) pending on-machine calibration. |
 | [src/frame-decide.c](src/frame-decide.c) / .h (M6.5, M7) | Pure C, no OBS, no Windows | The per-frame masking decision (SPEC 2.7 ordering): health → mode-transition → degraded-flag → overflow → geometry → per-rect mapping; guarantees a degradation flag never drops a blocklist confident mask (guardian V6 regression is a unit test). M7: allowlist failure direction — ANY unverified state yields `mask_all` (the mode's default-deny, guardian Q1); blocklist overflow masks what it has + chip. filter.c only resolves geometry, calls this, and draws. |
-| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings (mode + both lists, M7), panic hotkey (M7, full-source plate instead of the target, not persisted), plate texture cache, DEGRADED-chip and mask-all rendering. |
+| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings (mode + both lists, M7), panic hotkey (M7, full-source plate instead of the target, not persisted), window-picker properties (M8: combo + refresh/add buttons appending to the ACTIVE list with case-insensitive dedupe), plate texture cache, DEGRADED-chip and mask-all rendering. |
 | [src/plugin-main.c](src/plugin-main.c) | C, libobs | Module entry: `ss_state_init()` + `obs_register_source(&streamsentry_filter_info)`. |
 | src/plugin-support.c.in | template | obs-plugintemplate logging support (`obs_log`). |
 
@@ -91,6 +91,13 @@ within 500ms instead of trusting a partial rect list (guardian M7 V1;
 transition-logged). DWM cloak-query failure is mode-aware: blocklist
 skips the window (no mask on doubt), allowlist keeps processing it
 (default-deny must not leak on doubt — guardian M7 Q2).
+
+M8 adds `ss_enum_open_windows` (watcher.h): a UI-thread one-shot
+enumeration for the window picker — same visibility/cloak gates as
+detection (CLOAK_UNKNOWN excluded from the UI list), plain
+`proc_image_name` queries (the PID cache stays watcher-thread-only),
+deduplicated by process name. It feeds the picker combo in filter.c;
+detection is untouched.
 
 ## Data flow (one healthy frame)
 

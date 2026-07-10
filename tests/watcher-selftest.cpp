@@ -168,6 +168,22 @@ int main()
 		CHECK(gone, "blocklist rect disappeared after notepad closed");
 	}
 
+	/* ---- M8: picker enumeration (SPEC 2.5) ---- */
+	{
+		ss_open_window wins[64];
+		size_t n = ss_enum_open_windows(wins, 64);
+		bool ok = n > 0;
+		for (size_t i = 0; i < n && ok; i++) {
+			if (!wins[i].proc[0])
+				ok = false; /* every entry must carry a process name */
+			for (size_t j = i + 1; j < n && ok; j++)
+				if (strcmp(wins[i].proc, wins[j].proc) == 0)
+					ok = false; /* deduplicated by process */
+		}
+		CHECK(ok, "picker enumerates open windows (deduped, named)");
+		printf("info: picker sees %zu distinct processes\n", n);
+	}
+
 	/* ---- M7: allowlist mode (SPEC 2.3) ---- */
 	ss_watcher_set_mode_allowlist(true);
 	ss_watcher_set_allowlist("streamsentry_selftest_unique_token\n");
