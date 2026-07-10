@@ -301,10 +301,15 @@ static obs_properties_t *filter_get_properties(void *data)
 	 * refresh button re-enumerates; add appends to the ACTIVE list. */
 	obs_property_t *combo = obs_properties_add_list(props, "picker_window", obs_module_text("PickerWindow"),
 							OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_set_long_description(combo, obs_module_text("PickerWindowHint"));
 	picker_fill_combo(combo);
-	obs_properties_add_button(props, "picker_refresh", obs_module_text("PickerRefresh"),
-				  picker_refresh_clicked);
-	obs_properties_add_button2(props, "picker_add", obs_module_text("PickerAdd"), picker_add_clicked, data);
+	obs_property_t *refresh = obs_properties_add_button(props, "picker_refresh",
+							    obs_module_text("PickerRefresh"),
+							    picker_refresh_clicked);
+	obs_property_set_long_description(refresh, obs_module_text("PickerRefreshHint"));
+	obs_property_t *add = obs_properties_add_button2(props, "picker_add", obs_module_text("PickerAdd"),
+							 picker_add_clicked, data);
+	obs_property_set_long_description(add, obs_module_text("PickerAddHint"));
 	return props;
 }
 

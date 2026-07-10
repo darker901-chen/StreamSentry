@@ -309,6 +309,14 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 	long w = rc.right - rc.left, h = rc.bottom - rc.top;
 	if (w <= 0 || h <= 0)
 		return TRUE;
+	/* Sliver windows (drop-shadow strips, resize borders — e.g. LINE
+	 * spawns eight ≤11px shadow windows per window) cannot display
+	 * readable content at any supported DPI, so masking them has no
+	 * privacy value; they only burn SS_MAX_RECTS budget (the v0.1
+	 * "27 plates" storm was largely these). Deterministic, mode-
+	 * agnostic. Toasts (≥48px) and UIA field rects are unaffected. */
+	if (w <= 16 || h <= 16)
+		return TRUE;
 
 	wchar_t cls[256] = {0};
 	GetClassNameW(hwnd, cls, 256);

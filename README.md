@@ -134,6 +134,14 @@ StreamSentry is honest about what it does not do. As of v0.2:
 - **UAC / credential prompts on the secure desktop** are not capturable by
   OBS at all, so they cannot appear in your stream to begin with (the
   credential broker on the normal desktop *is* covered by the blocklist).
+- **Allowlist masks by window rectangle, not by visible stacking
+  order.** A maximized *unapproved* window sitting **behind** an
+  approved one still masks its whole rectangle — so if any unapproved
+  window is maximized, the output can be fully plated even though an
+  approved window is on top. This is the safe direction (the hidden
+  window would be exposed the moment you switch to it). Allowlist mode
+  works best when you keep only approved apps open and minimize/close
+  the rest.
 - **Apps that draw their own popup notifications** (LINE, BitComet,
   many Electron apps) do not use Windows toasts, so toast masking
   cannot see them — cover the app with the blocklist (or leave it off
