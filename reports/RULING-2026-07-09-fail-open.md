@@ -74,3 +74,23 @@ the authority chain is explicit:
    was amended under this ruling's authority (guardian V5): the
    "failure paths must land in blackout" bullet is replaced by
    failure-notice integrity per the amended rule 1.
+
+## Application addendum 2 (2026-07-10, M7 guardian questions)
+
+Two further derivative directions, ruled by applying this ruling's
+principles together with SPEC 2.3's default-deny (guardian M7 Q1/Q2;
+owner countersign requested at the M7 acceptance pass):
+
+5. **Allowlist + detection_degraded → mask-all.** Default-deny must
+   not depend on which processes the user approved: with an approved
+   toast host (e.g. explorer.exe) a degraded toast gate would let a
+   real toast render with only a chip. So in allowlist mode EVERY
+   unverified reason falls to mask-all; blocklist mode keeps the V6
+   guarantee (confident masks + chip).
+6. **Cloak-query failure is mode-aware.** Blocklist: skip the window
+   (a plate over a possibly-not-displayed window is a wrong mask —
+   addendum item 3). Allowlist: keep processing it (skipping would be
+   a confidence-less pass-through hole in default-deny). Accepted
+   bias, recorded per guardian R3: in allowlist mode a genuinely
+   cloaked toast-signature window with failing cloak query may get a
+   toast card — mask-more direction.

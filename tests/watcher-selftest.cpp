@@ -168,6 +168,36 @@ int main()
 		CHECK(gone, "blocklist rect disappeared after notepad closed");
 	}
 
+	/* ---- M7: allowlist mode (SPEC 2.3) ---- */
+	ss_watcher_set_mode_allowlist(true);
+	ss_watcher_set_allowlist("streamsentry_selftest_unique_token\n");
+	/* Nothing on a real desktop matches that token, so every visible
+	 * window is unapproved: expect either many WINDOW rects or the
+	 * mask_all overflow flag, in a snapshot stamped allowlist_mode. */
+	{
+		bool active = false;
+		for (int waited = 0; waited < 6000 && !active; waited += 100) {
+			ss_snapshot snap;
+			if (ss_state_try_read(&snap) && snap.allowlist_mode) {
+				size_t wins = 0;
+				for (size_t i = 0; i < snap.num_rects; i++)
+					if (snap.rects[i].kind == SS_RECT_WINDOW)
+						wins++;
+				if (snap.mask_all || wins > base_block)
+					active = true;
+			}
+			Sleep(100);
+		}
+		CHECK(active, "allowlist mode masks unapproved windows (rects or mask_all)");
+	}
+
+	ss_watcher_set_mode_allowlist(false);
+	{
+		bool restored = wait_for(
+			SS_RECT_WINDOW, [&](size_t c) { return c <= base_block; }, 6000);
+		CHECK(restored, "blocklist mode restored after switching back");
+	}
+
 	/* ---- fault injection: kill -> heartbeat freezes ---- */
 	uint64_t before_kill = read_heartbeat();
 	ss_watcher_debug_set_killed(true);

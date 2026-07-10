@@ -19,6 +19,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <obs-module.h>
 #include <plugin-support.h>
 #include <util/platform.h>
+#include <util/threading.h>
 #include <graphics/vec4.h>
 
 #include <string.h>
@@ -64,6 +65,13 @@ struct ss_filter {
 
 	/* settings */
 	bool enabled;
+	bool mode_allowlist; /* M7 (SPEC 2.3): failure direction + matching */
+
+	/* panic hotkey (M7, SPEC 2.4): toggled from the OBS hotkey thread,
+	 * read on the graphics thread; deliberately NOT persisted. */
+	volatile bool panic;
+	obs_hotkey_id panic_hotkey;
+	bool last_mask_all; /* transition logging */
 
 	/* last successfully read snapshot */
 	struct ss_snapshot snap;
@@ -95,12 +103,33 @@ static void filter_update(void *data, obs_data_t *settings)
 {
 	struct ss_filter *f = data;
 	f->enabled = obs_data_get_bool(settings, "enabled");
+	f->mode_allowlist = strcmp(obs_data_get_string(settings, "mode"), "allowlist") == 0;
 
-	/* The watcher is a single shared thread, so the blocklist is global:
-	 * with multiple StreamSentry filters the most-recently-updated one
-	 * wins (documented). Empty text falls back to the built-in defaults. */
-	const char *blocklist = obs_data_get_string(settings, "blocklist");
-	ss_watcher_set_blocklist(blocklist);
+	/* The watcher is a single shared thread, so lists and mode are
+	 * global: with multiple StreamSentry filters the most-recently-
+	 * updated one wins (documented). Empty blocklist falls back to the
+	 * built-in defaults; empty allowlist approves nothing (SPEC 2.3). */
+	ss_watcher_set_mode_allowlist(f->mode_allowlist);
+	ss_watcher_set_blocklist(obs_data_get_string(settings, "blocklist"));
+	ss_watcher_set_allowlist(obs_data_get_string(settings, "allowlist"));
+}
+
+/* Panic hotkey (M7, SPEC 2.4): toggle. Deliberate user action; state
+ * lives only in memory (fresh OBS session starts released). */
+static void panic_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+	struct ss_filter *f = data;
+	if (!pressed)
+		return;
+	bool now = !os_atomic_load_bool(&f->panic);
+	os_atomic_set_bool(&f->panic, now);
+	if (now)
+		obs_log(LOG_WARNING, "PANIC engaged by hotkey - masking the entire source%s",
+			f->enabled ? "" : " (filter currently disabled - takes effect when enabled)");
+	else
+		obs_log(LOG_INFO, "panic released by hotkey - normal pipeline resumed");
 }
 
 static void *filter_create(obs_data_t *settings, obs_source_t *source)
@@ -108,6 +137,8 @@ static void *filter_create(obs_data_t *settings, obs_source_t *source)
 	struct ss_filter *f = bzalloc(sizeof(struct ss_filter));
 	f->source = source;
 	f->last_mode = SS_MODE_INIT;
+	f->panic_hotkey = obs_hotkey_register_source(source, "streamsentry.panic", obs_module_text("PanicHotkey"),
+						     panic_hotkey_cb, f);
 	ss_watcher_start();
 	filter_update(f, settings);
 	return f;
@@ -132,9 +163,22 @@ static void free_textures(struct ss_filter *f)
 static void filter_destroy(void *data)
 {
 	struct ss_filter *f = data;
+	if (f->panic_hotkey != OBS_INVALID_HOTKEY_ID)
+		obs_hotkey_unregister(f->panic_hotkey);
 	free_textures(f);
 	ss_watcher_stop();
 	bfree(f);
+}
+
+/* Show only the active mode's list (SPEC 2.3: separate storage — a
+ * mode switch must never reinterpret one list as the other). */
+static bool mode_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	bool allow = strcmp(obs_data_get_string(settings, "mode"), "allowlist") == 0;
+	obs_property_set_visible(obs_properties_get(props, "blocklist"), !allow);
+	obs_property_set_visible(obs_properties_get(props, "allowlist"), allow);
+	return true;
 }
 
 static obs_properties_t *filter_get_properties(void *data)
@@ -144,19 +188,34 @@ static obs_properties_t *filter_get_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 	obs_properties_add_bool(props, "enabled", obs_module_text("Enable"));
 
-	/* Blocklist: one process name or window-title substring per line
-	 * (SPEC settings UI). There is deliberately NO option to disable
-	 * the protection-degraded status chip. */
+	obs_property_t *mode =
+		obs_properties_add_list(props, "mode", obs_module_text("Mode"), OBS_COMBO_TYPE_LIST,
+					OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(mode, obs_module_text("ModeBlocklist"), "blocklist");
+	obs_property_list_add_string(mode, obs_module_text("ModeAllowlist"), "allowlist");
+	obs_property_set_modified_callback(mode, mode_modified);
+
+	/* One process name or window-title substring per line (SPEC
+	 * settings UI). There is deliberately NO option to disable the
+	 * protection-degraded status chip. */
 	obs_property_t *bl =
 		obs_properties_add_text(props, "blocklist", obs_module_text("Blocklist"), OBS_TEXT_MULTILINE);
 	obs_property_set_long_description(bl, obs_module_text("BlocklistHint"));
+	obs_property_t *al =
+		obs_properties_add_text(props, "allowlist", obs_module_text("Allowlist"), OBS_TEXT_MULTILINE);
+	obs_property_set_long_description(al, obs_module_text("AllowlistHint"));
 	return props;
 }
 
 static void filter_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, "enabled", true);
+	/* Blocklist mode is the default: v0.1 behavior preserved on
+	 * upgrade (SPEC 2.3). Allowlist defaults to empty = approve
+	 * nothing. */
+	obs_data_set_default_string(settings, "mode", "blocklist");
 	obs_data_set_default_string(settings, "blocklist", ss_watcher_default_blocklist_text());
+	obs_data_set_default_string(settings, "allowlist", "");
 }
 
 /* ---- drawing helpers ------------------------------------------------ */
@@ -232,6 +291,23 @@ static gs_texture_t *get_plate_texture(struct ss_filter *f, enum ss_rect_kind ki
 	victim->last_use = f->frame_counter;
 	victim->tex = tex;
 	return tex;
+}
+
+/* Full-source privacy plate (M7): drawn INSTEAD of the target for the
+ * panic hotkey (SPEC 2.4) and allowlist mask-all (SPEC 2.3). Solid
+ * opaque fallback if the texture cannot be created — a full-cover mask
+ * is never dropped (iron rule 3). */
+static void draw_full_plate(struct ss_filter *f, uint32_t w, uint32_t h)
+{
+	gs_texture_t *tex = get_plate_texture(f, SS_RECT_WINDOW, bucket_dim((double)w), bucket_dim((double)h));
+	if (tex) {
+		draw_texture(tex, 0.0f, 0.0f, (float)w, (float)h);
+	} else {
+		struct vec4 dark;
+		vec4_set(&dark, 0.08f, 0.09f, 0.11f, 1.0f);
+		draw_solid(0.0f, 0.0f, (float)w, (float)h, &dark);
+		obs_log(LOG_WARNING, "full plate texture allocation failed; solid fallback drawn");
+	}
 }
 
 /* Small opaque status chip in the top-left corner of the normally
@@ -317,8 +393,8 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 		geom_valid = ss_resolve_capture_geom(target, &geom);
 
 	struct ss_frame_decision dec;
-	ss_decide_frame(&f->snap, f->have_snap, age, SS_HEARTBEAT_STALE_NS, geom_valid, &geom, SS_MASK_PAD_PX,
-			&dec);
+	ss_decide_frame(&f->snap, f->have_snap, age, SS_HEARTBEAT_STALE_NS, f->mode_allowlist, geom_valid, &geom,
+			SS_MASK_PAD_PX, &dec);
 
 #ifdef STREAMSENTRY_PERF_LOG
 	/* Per-frame CPU decision cost (state read + heartbeat + geometry +
@@ -336,16 +412,49 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 	}
 #endif
 
-	/* The source renders in EVERY case (owner ruling 2026-07-09: never
-	 * disrupt the output). If the filter chain cannot be entered, fall
-	 * back to skipping the filter — the source still shows — and put
-	 * the chip on top when masks were needed but undrawable. */
-	if (!obs_source_process_filter_begin(f->source, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING)) {
-		obs_source_skip_video_filter(f->source);
-		if (dec.unverified || dec.num_mapped > 0) {
+	/* Panic (SPEC 2.4) and mask-all (SPEC 2.3) draw a full-source
+	 * privacy plate INSTEAD of the target — the target is never
+	 * composed. Panic is a deliberate user action and outranks health
+	 * state; the chip still stacks on top when protection is
+	 * unverified, so the streamer keeps learning about failures. */
+	if (os_atomic_load_bool(&f->panic) || dec.mask_all) {
+		draw_full_plate(f, w, h);
+		if (dec.unverified)
 			draw_status_chip(f, w, h);
+		if (dec.mask_all && !f->last_mask_all) {
+			f->last_mask_all = true;
+			obs_log(LOG_INFO, "mask-all engaged (%s)",
+				f->mode_allowlist ? "allowlist default" : "rect overflow");
+		}
+		log_mode(f, dec.unverified ? SS_MODE_DEGRADED : SS_MODE_NORMAL, age == UINT64_MAX ? 0 : age,
+			 dec.reason);
+		return;
+	}
+	if (f->last_mask_all) {
+		f->last_mask_all = false;
+		obs_log(LOG_INFO, "mask-all released");
+	}
+
+	/* If the filter chain cannot be entered: blocklist mode falls back
+	 * to skipping the filter — the source still shows — with the chip
+	 * on top when masks were needed but undrawable (owner ruling: never
+	 * disrupt the output). Allowlist mode with masks pending must NOT
+	 * fail open (guardian M7 V2): the full-source plate needs no filter
+	 * chain, so default-deny is drawable on this path too. */
+	if (!obs_source_process_filter_begin(f->source, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING)) {
+		if (dec.unverified || dec.num_mapped > 0) {
+			if (f->mode_allowlist) {
+				draw_full_plate(f, w, h);
+				if (dec.unverified)
+					draw_status_chip(f, w, h);
+			} else {
+				obs_source_skip_video_filter(f->source);
+				draw_status_chip(f, w, h);
+			}
 			log_mode(f, SS_MODE_DEGRADED, age == UINT64_MAX ? 0 : age,
 				 "filter chain bypassed with masks pending");
+		} else {
+			obs_source_skip_video_filter(f->source);
 		}
 		return;
 	}

@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 through M6.5)
+# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 through M7)
 
 This documents the plugin **as actually built**, not aspirations —
 v0.1 as shipped at M4, the M6 hardening changes (marked "M6"), and the
@@ -20,8 +20,8 @@ implementation satisfies them.
 | [src/geom-resolve.c](src/geom-resolve.c) / .h | C, Win32 + libobs | Resolves *what the filter's target source captures* (virtual-screen region + source pixel size). v0.1: `monitor_capture` only, and only when exactly one monitor's pixel size matches the source base size. Everything else → false → caller renders DEGRADED (chip) while masks are pending. |
 | [src/plate-gen.c](src/plate-gen.c) / .h | Pure C, no OBS, no Windows | CPU generator for mask visuals (RGBA8888): toast card, privacy plate, failure status chip. Opacity (iron rule 3) is a *tested property*: `ss_image_opaque_inside()` + `ss_plate_max_corner_inset()` let unit tests prove every pixel inside the corner inset is alpha-255. |
 | [src/toast-gate.c](src/toast-gate.c) / .h (M6) | Pure C, no OBS, no Windows | Toast geometry gate (SPEC 2.2): right-edge spawn band + generous size envelope, evaluated per monitor. Applied *after* the process+class signature; only removes toast-card over-masking. M6.5: uncertainty (no monitors, degenerate input) classifies as NOT a toast — mask only on confidence (SPEC 2.7). Constants are PROVISIONAL documented-metrics values (reports/M6-toast-probe.txt) pending on-machine calibration. |
-| [src/frame-decide.c](src/frame-decide.c) / .h (M6.5) | Pure C, no OBS, no Windows | The per-frame masking decision (SPEC 2.7 ordering): health → degraded-flag → geometry → per-rect mapping; guarantees a degradation flag never drops a confident mask (guardian V6 regression is a unit test). filter.c only resolves geometry, calls this, and draws. |
-| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings, per-frame health decision, coordinate mapping, plate texture cache, DEGRADED-chip rendering (M6.5). |
+| [src/frame-decide.c](src/frame-decide.c) / .h (M6.5, M7) | Pure C, no OBS, no Windows | The per-frame masking decision (SPEC 2.7 ordering): health → mode-transition → degraded-flag → overflow → geometry → per-rect mapping; guarantees a degradation flag never drops a blocklist confident mask (guardian V6 regression is a unit test). M7: allowlist failure direction — ANY unverified state yields `mask_all` (the mode's default-deny, guardian Q1); blocklist overflow masks what it has + chip. filter.c only resolves geometry, calls this, and draws. |
+| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings (mode + both lists, M7), panic hotkey (M7, full-source plate instead of the target, not persisted), plate texture cache, DEGRADED-chip and mask-all rendering. |
 | [src/plugin-main.c](src/plugin-main.c) | C, libobs | Module entry: `ss_state_init()` + `obs_register_source(&streamsentry_filter_info)`. |
 | src/plugin-support.c.in | template | obs-plugintemplate logging support (`obs_log`). |
 
@@ -62,7 +62,7 @@ Locks (all short-held):
 | Lock | Guards | Held by |
 |---|---|---|
 | `g_mutex` (watcher) | start/stop refcount + thread handles | filter create/destroy, `ss_watcher_is_running` |
-| `g_cfg_mutex` (watcher) | blocklist vector | `ss_watcher_set_blocklist` (settings thread), watcher tick **for the whole EnumWindows pass** (so a settings update never observes a half-applied list) |
+| `g_cfg_mutex` (watcher) | blocklist + allowlist vectors + mode (M7) | `ss_watcher_set_blocklist/allowlist/mode_allowlist` (settings thread), watcher tick **for the whole EnumWindows pass** (so a settings update never observes a half-applied list) |
 | `g_pw_mutex` (watcher) | password-field rect | UIA callbacks, watcher tick |
 | `state_mutex` (shared-state) | the one snapshot | watcher publish (blocking, brief memcpy), render trylock |
 
@@ -84,6 +84,14 @@ threshold). Thread priority is deliberately untouched — SPEC 2.1 makes
 it the second lever, only if p99 under load still approaches the
 threshold after the cache.
 
+M7 watcher-side guarantees: a genuine `EnumWindows` FAILURE (FALSE
+without the overflow flag) skips the publish entirely — the heartbeat
+only certifies a completed pass, so the render side goes unverified
+within 500ms instead of trusting a partial rect list (guardian M7 V1;
+transition-logged). DWM cloak-query failure is mode-aware: blocklist
+skips the window (no mask on doubt), allowlist keeps processing it
+(default-deny must not leak on doubt — guardian M7 Q2).
+
 ## Data flow (one healthy frame)
 
 ```
@@ -98,11 +106,13 @@ EnumWindows pass:                                 enabled? target has size? else
           falls through to block/allowlist)          (monitor_capture, unambiguous
   block:  entry substring-matches process             monitor match only) else UNVERIFIED
           image name OR window title                 ss_map_screen_rect(+12px pad) each rect
-  (proc names via PID cache, M6)                     OK -> keep; NOT_VISIBLE -> skip;
-UIA focus rect (if valid) appended                   INVALID -> UNVERIFIED (keep OK rects)
-snapshot.detection_degraded (M6.5)                 (health/degraded/geometry/mapping order
-snapshot.heartbeat = os_gettime_ns()                is the pure frame-decide module, M6.5)
-ss_state_publish(snapshot)                        ALWAYS render target through filter chain
+  allow (M7): NOT-matching windows masked            OK -> keep; NOT_VISIBLE -> skip;
+  (proc names via PID cache, M6)                     INVALID -> UNVERIFIED (keep OK rects)
+UIA focus rect (if valid) appended                 (health/mode/degraded/overflow/geometry/
+snapshot.detection_degraded (M6.5)                  mapping order = pure frame-decide)
+snapshot.allowlist_mode + mask_all (M7)           panic or mask_all -> full-source plate
+snapshot.heartbeat = os_gettime_ns()                INSTEAD of the target (M7)
+ss_state_publish(snapshot)                        else ALWAYS render target through chain,
 tick > 250ms -> LOG_WARNING (M6)                  draw plate per confidently mapped rect
                                                   UNVERIFIED -> small status chip on top
                                                   (M6.5: blackout removed, SPEC 2.7)
@@ -143,10 +153,20 @@ DEGRADED triggers, in evaluation order:
 |---|---|---|---|
 | 1 | `no detection snapshot` — never read a snapshot since filter create | filter.c | none |
 | 2 | `heartbeat stale` — heartbeat older than `SS_HEARTBEAT_STALE_NS` = 500ms (also if in the future) | filter.c | none |
-| 3 | `detection degraded (monitor data unavailable)` — watcher published `detection_degraded` (monitor enumeration failed/truncated → toast gate cannot affirm; heartbeat still fresh; watcher logs the transition) | watcher.cpp → shared-state | block/allowlist + password masks still active |
-| 4 | `capture geometry unresolved` — rects pending but target is not monitor_capture, has zero size, or no/ambiguous monitor match (incl. two identical-resolution monitors) | geom-resolve.c | none |
-| 5 | `coordinate mapping failed for a detection` — some rect maps `SS_MAP_INVALID` | coord-map.c | **confidently mapped rects still masked** |
-| 6 | `filter chain bypassed with masks pending` — `process_filter_begin` failed while unverified or masks were due; source shown via `skip_video_filter`, chip on top | filter.c | none drawable |
+| 3 | `mode transition pending` (M7) — the snapshot was produced under the other matching mode; its rects mean the opposite thing (one-tick transient after a mode switch) | frame-decide.c | none |
+| 4 | `detection degraded (monitor data unavailable)` — watcher published `detection_degraded` (monitor enumeration failed/truncated → toast gate cannot affirm; heartbeat still fresh; watcher logs the transition) | watcher.cpp → shared-state | blocklist: window+password masks still active; allowlist: mask_all (Q1) |
+| 5 | `detection overflow (some masks dropped)` (M7, blocklist mode only) — the enum pass hit the `SS_MAX_RECTS` budget | watcher.cpp → shared-state | the 64 rects we do have still masked |
+| 6 | `capture geometry unresolved` — rects pending but target is not monitor_capture, has zero size, or no/ambiguous monitor match (incl. two identical-resolution monitors) | geom-resolve.c | none |
+| 7 | `coordinate mapping failed for a detection` — some rect maps `SS_MAP_INVALID` | coord-map.c | **confidently mapped rects still masked** |
+| 8 | `filter chain bypassed with masks pending` — `process_filter_begin` failed while masks were due; blocklist: source shown via `skip_video_filter` + chip; allowlist: full-source plate (needs no chain; reachable only with the frame otherwise healthy — unverified allowlist frames already went mask-all before the chain, so the chip line in that arm is defensive dead code) | filter.c | blocklist: none drawable; allowlist: full plate |
+
+Allowlist failure direction (M7, SPEC 2.3): whenever the frame is
+unverified for ANY reason — including degraded-only (guardian M7 Q1:
+an approved toast host would otherwise show a real toast during
+degradation) — allowlist mode sets `mask_all`: one full-source privacy
+plate is drawn INSTEAD of the target, chip on top. Watcher rect-budget
+overflow in allowlist mode is `mask_all` without the chip — that is
+the mode's default state, not a failure.
 
 Not a DEGRADED trigger: plate-texture allocation failure for a
 confidently mapped rect draws a **solid opaque fallback fill** instead
@@ -167,9 +187,12 @@ freezes publish *and* heartbeat exactly like a dead thread. DEGRADED
 engage/clear transitions are logged once each (no per-frame spam) with
 the heartbeat age in ms.
 
-Mode note for M7 (allowlist): per SPEC 2.7 the allowlist mode's failure
-state is its own default — a full-source mask-all plate + chip — since
-default-deny is what that user opted into. The chip mechanism is shared.
+Panic hotkey (M7, SPEC 2.4): a deliberate user action that outranks
+health state — while engaged, the full-source privacy plate is drawn
+INSTEAD of the target on every frame (the target is never composed),
+with the chip stacked on top whenever protection is simultaneously
+unverified. Toggled from the OBS hotkey thread via an atomic bool; not
+persisted across sessions; engage/release are logged.
 
 ## Render-side caching (why per-frame cost is flat)
 
@@ -197,8 +220,8 @@ Measured (M3, reports/M3-perf.md): watcher ≈ 0.55% of one core at
 | `coord-map-tests` (ctest) | pure unit | mapping math: intersection, mixed-DPI scaling, padding, clamping, INVALID on degenerate input |
 | `plate-gen-tests` (ctest) | pure unit | **opacity as a property**: plates opaque inside corner inset; corner inset < mask pad; banner opaque |
 | `toast-gate-tests` (ctest, M6) | pure unit | geometry gate: documented toast shapes pass at 100–200% DPI (incl. slide-in and secondary-monitor cases); recorded flyover shapes rejected; **uncertainty classifies as NOT a toast** (no monitors / degenerate / NaN input — M6.5, SPEC 2.7) |
-| `frame-decide-tests` (ctest, M6.5) | pure unit | SPEC 2.7 ordering: **degraded flag keeps confident masks** (guardian V6 regression), stale drops all masks, geometry/mapping failures flag the frame while confident rects stay masked, reason precedence |
-| `watcher-selftest` (manual exe, not registered with `add_test`) | integration | real EnumWindows/UIA against a live desktop: spawns notepad, fires a toast, exercises blocklist matching and the kill→stale-heartbeat path with obs stubs |
+| `frame-decide-tests` (ctest, M6.5, M7) | pure unit | SPEC 2.7 ordering: **degraded flag keeps blocklist confident masks** (guardian V6 regression), stale drops all masks, geometry/mapping failures flag the frame while confident rects stay masked, reason precedence; M7: allowlist fails to mask-all for EVERY unverified reason incl. degraded (guardian Q1), overflow semantics per mode |
+| `watcher-selftest` (manual exe, not registered with `add_test`) | integration | real EnumWindows/UIA against a live desktop: spawns notepad, fires a toast, exercises blocklist matching, the M7 allowlist mode switch (unapproved windows masked, restore on switch-back), and the kill→stale-heartbeat path with obs stubs |
 
 The selftest links `watcher.cpp + shared-state.c` directly with its own
 `obs_log`/`os_gettime_ns`/pthread stubs — that is why watcher.cpp must

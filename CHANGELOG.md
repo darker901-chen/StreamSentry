@@ -9,6 +9,119 @@ Two unreleased sets live here, newest first: the v0.2 development cycle
 (M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
 Nothing has been pushed or tagged; publishing is a human step.
 
+### 0.2.0-m7 - 2026-07-10
+
+Milestone M7 delivers the two v0.2 protection-mode features: **allowlist
+mode** (SPEC Part 2 item 2.3 — mask everything except approved windows) and
+the **panic hotkey** (SPEC Part 2 item 2.4 — one key replaces the whole
+source with an opaque plate). The change set at the final gate is 12 files
+(including the two staged gate reports); no build-system change and no
+version bump (still builds as `streamsentry.dll` 0.1.0). Verified by
+`reports/M7-verifier.md` (Verdict: VERIFIED — two full from-scratch runs;
+the guardian's round-1 audit drove code changes, and the RUN-2 ADDENDUM,
+authoritative, re-ran the whole sequence against the final tree pinned by
+blob hash: zero-warning builds in both `STREAMSENTRY_PERF_LOG` variants
+with the tree left OFF, ctest 4/4 suites — 137 assertions,
+watcher-selftest deterministic legs all pass including both new allowlist
+legs, with the expected INCONCLUSIVE toast leg) and
+`reports/M7-spec-guardian.md` (round-2 verdict: PASS; the round-1 FAIL —
+three violations, three questions — is preserved verbatim, and
+`reports/GATE-CATCHES.md` case 6 indexes it). The PASS is conditional on
+the milestone commit carrying the TESTING.md M7 note (present) and both
+audit rounds of the guardian report.
+
+#### Added
+- **Allowlist mode** (SPEC 2.3): a Mode dropdown (Blocklist / Allowlist) in
+  the filter settings. Blocklist stays the default and a pre-M7 settings
+  blob resolves to blocklist, so existing setups keep their v0.1 behavior
+  on upgrade. In allowlist mode, every visible non-cloaked top-level window
+  that does not match the approval list is masked with an opaque privacy
+  plate; matching semantics are identical to the blocklist (owner ruling
+  a434b18: case-insensitive substring vs process image name OR window
+  title). The allowlist lives under its own settings key — switching modes
+  never reinterprets one list as the other — and an empty allowlist
+  approves nothing: no default fallback, no implicit approvals (taskbar and
+  wallpaper are masked until approved). Toast and password detection stay
+  active in both modes; approving a process does not exempt its toasts.
+- **Allowlist failure direction** (SPEC 2.3 + 2.7): whenever the frame is
+  unverified for ANY reason (no snapshot, stale heartbeat, mode-switch
+  transient, unresolved capture geometry, mapping failure, detection
+  degraded, filter-begin failure), an allowlist filter draws one
+  full-source opaque privacy plate instead of the source — the mode's own
+  opted-into default (default-deny), the designed exception under CLAUDE.md
+  rule 1. Blocklist mode keeps the M6.5 semantics (source renders + status
+  chip; confident masks are kept).
+- **Panic hotkey** (SPEC 2.4): one OBS hotkey per filter instance,
+  "StreamSentry: mask everything (panic)" (bound under OBS Settings →
+  Hotkeys; no properties-UI element), toggle. Engaged, the render draws a
+  full-source opaque privacy plate INSTEAD of the target — the target is
+  never composed into the frame. The protection-degraded chip stacks on top
+  if the frame is simultaneously unverified; engage/release are logged
+  (with a suffix noting when the filter is disabled); the state is not
+  persisted across sessions.
+- **Rect-budget overflow semantics** (closes a guardian observation carried
+  since M5): more detections than the 64-rect snapshot budget → the watcher
+  publishes a `mask_all` snapshot. Allowlist renders the full-source plate
+  (the mode default); blocklist keeps every rect it did publish and shows a
+  "detection overflow (some masks dropped)" chip plus a warning log — the
+  cap is no longer a silent drop in either mode.
+- Tests: `frame-decide-tests` grew 25 → 55 assertions (ten M7 decision
+  cases, the allowlist-degraded flip, and a blocklist-degraded companion
+  pinning the M6.5 confident-masks-kept guarantee); `watcher-selftest`
+  gained two allowlist legs (unapproved windows masked; blocklist restored
+  on switch-back). Six new locale strings (Mode, ModeBlocklist,
+  ModeAllowlist, Allowlist, AllowlistHint, PanicHotkey).
+
+#### Changed
+- Snapshot contract (`src/shared-state.h`): gains `allowlist_mode` and
+  `mask_all` flags with separate documented semantics per mode. The
+  frame-decision module (`src/frame-decide.c`/`.h`) takes the
+  filter-configured mode as authoritative and treats a snapshot produced
+  under the other mode as untrusted for one tick ("mode transition
+  pending").
+- Watcher (`src/watcher.cpp`), from the guardian's round-1 audit: a genuine
+  `EnumWindows` failure no longer publishes the tick (no snapshot, no
+  heartbeat — the render side goes unverified within 500 ms via the
+  existing stale trigger; the failure is transition-logged, never silent),
+  and the DWMWA_CLOAKED query is tri-state and mode-aware — blocklist skips
+  a window on cloak doubt (no mask without confidence), allowlist masks it
+  unless approved (no confidence-less pass-through hole in default-deny).
+- Render path (`src/filter.c`): the `process_filter_begin`-failure branch
+  is mode-aware — in allowlist mode with masks pending it draws the
+  full-source plate instead of skipping the filter, so default-deny does
+  not fail open on that path; the panic-engage log notes when the filter is
+  disabled ("takes effect when enabled").
+- Allowlist + detection-degraded falls to mask-all (guardian Q1:
+  default-deny must not depend on which processes the user approved — an
+  approved toast host would otherwise show a real toast during
+  degradation). This and the mode-aware cloak direction (Q2) are recorded
+  as derivative rulings in `reports/RULING-2026-07-09-fail-open.md`
+  (Application addendum 2), both flagged for owner countersign.
+- `ARCHITECTURE.md`: M7 as-built updates (mode rows in the failure trigger
+  table, watcher publish guarantees, panic paragraph).
+
+#### Dependencies
+- Unchanged: libobs + Windows SDK only. The only new APIs are libobs hotkey
+  registration and atomics (`obs_hotkey_register_source` /
+  `obs_hotkey_unregister`, `os_atomic`); `CMakeLists.txt` is blob-identical
+  to M6.5 (verifier-pinned — no build-system change).
+
+#### Pending owner acceptance (binding for the v0.2 ship)
+- The SPEC 2.3/2.4 acceptance rows are owner-manual (rendered pixels and
+  hotkeys need a live OBS): approved app visible while everything else is
+  plated (taskbar/wallpaper until approved); more than 64 unapproved
+  windows → one full-source plate; allowlist + watcher killed → mask-all
+  plate within 500 ms plus chip; mode round-trip preserving both lists;
+  panic engage/release on the next frame in both modes; panic + watcher
+  killed → plate stays with the chip on top; panic not persisted. See
+  TESTING.md (M7) for the checklist.
+- Toast exemption from approval (an approved process's toast still gets the
+  notification card) stays BLOCKED with the other real-toast rows while
+  banners are system-suppressed on the dev machine.
+- Owner countersign of the M7 derivative rulings (Q1/Q2 in the ruling's
+  Application addendum 2, including the accepted mask-more residual; Q3
+  panic-vs-Enable), alongside the M6.5 addendum countersign items.
+
 ### 0.2.0-m6.5 - 2026-07-10
 
 Milestone M6.5 repositions the product's failure behavior on an owner product

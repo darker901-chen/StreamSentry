@@ -73,7 +73,7 @@ int main(void)
 	/* healthy, one confident blocklist rect: masked, no chip */
 	{
 		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
-		ss_decide_frame(&s, true, 0, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(!d.unverified);
 		CHECK(d.num_mapped == 1);
 		CHECK(d.kinds[0] == SS_RECT_WINDOW);
@@ -84,7 +84,7 @@ int main(void)
 	{
 		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
 		s.detection_degraded = true;
-		ss_decide_frame(&s, true, 0, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(strcmp(d.reason, "detection degraded (monitor data unavailable)") == 0);
 		CHECK(d.num_mapped == 1); /* the confident mask is NOT dropped */
@@ -96,14 +96,14 @@ int main(void)
 		struct ss_snapshot s;
 		memset(&s, 0, sizeof(s));
 		s.detection_degraded = true;
-		ss_decide_frame(&s, true, 0, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(d.num_mapped == 0);
 	}
 
 	/* no snapshot ever: chip, no masks */
 	{
-		ss_decide_frame(NULL, false, UINT64_MAX, STALE_NS, false, NULL, PAD, &d);
+		ss_decide_frame(NULL, false, UINT64_MAX, STALE_NS, false, false, NULL, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(strcmp(d.reason, "no detection snapshot") == 0);
 		CHECK(d.num_mapped == 0);
@@ -112,7 +112,7 @@ int main(void)
 	/* stale heartbeat: stale rects are NOT drawn */
 	{
 		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
-		ss_decide_frame(&s, true, STALE_NS + 1, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, STALE_NS + 1, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(strcmp(d.reason, "heartbeat stale") == 0);
 		CHECK(d.num_mapped == 0);
@@ -121,7 +121,7 @@ int main(void)
 	/* rects pending but geometry unresolved: chip, no masks */
 	{
 		struct ss_snapshot s = snap_with_rect(SS_RECT_TOAST, 1500, 30, 396, 180);
-		ss_decide_frame(&s, true, 0, STALE_NS, false, NULL, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, false, NULL, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(strcmp(d.reason, "capture geometry unresolved (unsupported source or scaled capture)") == 0);
 		CHECK(d.num_mapped == 0);
@@ -143,7 +143,7 @@ int main(void)
 		s.rects[1].screen.y = 50;
 		s.rects[1].screen.w = -5; /* degenerate -> SS_MAP_INVALID */
 		s.rects[1].screen.h = 40;
-		ss_decide_frame(&s, true, 0, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(strcmp(d.reason, "coordinate mapping failed for a detection") == 0);
 		CHECK(d.num_mapped == 1);
@@ -153,7 +153,7 @@ int main(void)
 	/* off-capture rect: skipped silently, no chip */
 	{
 		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 5000, 100, 400, 300);
-		ss_decide_frame(&s, true, 0, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(!d.unverified);
 		CHECK(d.num_mapped == 0);
 	}
@@ -162,9 +162,124 @@ int main(void)
 	{
 		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 50, 50, -5, 40);
 		s.detection_degraded = true;
-		ss_decide_frame(&s, true, 0, STALE_NS, true, &geom, PAD, &d);
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
 		CHECK(d.unverified);
 		CHECK(strcmp(d.reason, "detection degraded (monitor data unavailable)") == 0);
+	}
+
+	/* ---- M7 allowlist mode (SPEC 2.3 + 2.7) ---- */
+
+	/* allowlist healthy: unapproved-window rects get per-window plates */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, true, true, &geom, PAD, &d);
+		CHECK(!d.unverified);
+		CHECK(!d.mask_all);
+		CHECK(d.num_mapped == 1);
+	}
+
+	/* allowlist + stale: fail toward the mode's default = mask-all */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = true;
+		ss_decide_frame(&s, true, STALE_NS + 1, STALE_NS, true, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(d.mask_all);
+		CHECK(d.num_mapped == 0);
+	}
+
+	/* allowlist + no snapshot: mask-all */
+	{
+		ss_decide_frame(NULL, false, UINT64_MAX, STALE_NS, true, false, NULL, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(d.mask_all);
+	}
+
+	/* mode transition: snapshot produced under blocklist while filter
+	 * is allowlist -> rects untrusted -> mask-all + chip */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = false;
+		ss_decide_frame(&s, true, 0, STALE_NS, true, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(strcmp(d.reason, "mode transition pending") == 0);
+		CHECK(d.mask_all);
+		CHECK(d.num_mapped == 0);
+	}
+	/* ...and the mirror direction (allowlist snapshot, blocklist
+	 * filter): untrusted, but NO mask-all in blocklist mode */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(!d.mask_all);
+		CHECK(d.num_mapped == 0);
+	}
+
+	/* allowlist + geometry unresolved: mask-all (cannot place plates) */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, true, false, NULL, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(d.mask_all);
+	}
+
+	/* allowlist + one INVALID rect: an unapproved window might show ->
+	 * mask-all */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 50, 50, -5, 40);
+		s.allowlist_mode = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, true, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(d.mask_all);
+	}
+
+	/* allowlist + degraded: mask-all too (guardian M7 Q1 — an approved
+	 * toast host would otherwise show a real toast with chip only;
+	 * default-deny must not depend on the approval list) */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = true;
+		s.detection_degraded = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, true, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(d.mask_all);
+	}
+	/* ...while blocklist + degraded keeps the V6 guarantee (masks kept,
+	 * no blanket) — unchanged by the allowlist rule */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.detection_degraded = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(!d.mask_all);
+		CHECK(d.num_mapped == 1);
+	}
+
+	/* watcher overflow in allowlist mode: mask-all as the mode's
+	 * default, NOT a failure (no chip) */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.allowlist_mode = true;
+		s.mask_all = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, true, true, &geom, PAD, &d);
+		CHECK(!d.unverified);
+		CHECK(d.mask_all);
+	}
+
+	/* watcher overflow in blocklist mode: mask what we have + chip;
+	 * blanketing would be a wrong mask for this mode */
+	{
+		struct ss_snapshot s = snap_with_rect(SS_RECT_WINDOW, 100, 100, 400, 300);
+		s.mask_all = true;
+		ss_decide_frame(&s, true, 0, STALE_NS, false, true, &geom, PAD, &d);
+		CHECK(d.unverified);
+		CHECK(strcmp(d.reason, "detection overflow (some masks dropped)") == 0);
+		CHECK(!d.mask_all);
+		CHECK(d.num_mapped == 1);
 	}
 
 	if (failures) {

@@ -99,14 +99,17 @@ HANDLE g_thread = nullptr;
 HANDLE g_stop_event = nullptr;
 volatile LONG g_killed = 0;     /* fault-injection flag */
 
-std::mutex g_cfg_mutex;         /* guards blocklist */
+std::mutex g_cfg_mutex;         /* guards lists + mode */
 std::vector<std::wstring> g_blocklist;
+std::vector<std::wstring> g_allowlist;  /* M7: empty = approve nothing */
+bool g_mode_allowlist = false;          /* M7: false = v0.1 blocklist mode */
 
 std::mutex g_pw_mutex;          /* guards password-field rect */
 bool g_pw_valid = false;
 RECT g_pw_rect = {0, 0, 0, 0};
 
 bool g_mons_degraded = false;   /* watcher-thread-only: transition logging */
+bool g_enum_failed = false;     /* watcher-thread-only: transition logging */
 
 std::wstring to_lower(std::wstring s)
 {
@@ -210,16 +213,36 @@ void pid_cache_end_tick()
 	}
 }
 
-bool is_cloaked(HWND hwnd)
+enum CloakState { CLOAK_NO = 0, CLOAK_YES, CLOAK_UNKNOWN };
+
+CloakState cloak_state(HWND hwnd)
 {
 	int cloaked = 0;
 	if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))))
-		return cloaked != 0;
-	/* Query failure -> treat as cloaked (skip). We cannot confirm the
-	 * window is actually displayed, and a plate over a not-displayed
-	 * window would be a wrong mask (SPEC 2.7: mask only on confidence;
-	 * supersedes the v0.1 report-on-doubt direction). */
-	return true;
+		return cloaked ? CLOAK_YES : CLOAK_NO;
+	/* Query failure: we cannot confirm whether the window is actually
+	 * displayed. The safe direction depends on the mode (guardian M7
+	 * Q2): blocklist -> skip (a plate over a not-displayed window
+	 * would be a wrong mask, SPEC 2.7); allowlist -> keep processing
+	 * (skipping would punch a confidence-less pass-through hole in
+	 * default-deny, SPEC 2.3 - the window is masked unless approved). */
+	return CLOAK_UNKNOWN;
+}
+
+/* Case-insensitive substring match of any list entry against the
+ * process image name OR the window title (owner ruling a434b18; M7:
+ * identical semantics for blocklist and allowlist, SPEC 2.3). Inputs
+ * are already lowercased. */
+bool matches_list(const std::vector<std::wstring> &list, const std::wstring &proc, const std::wstring &title_l)
+{
+	for (const std::wstring &entry : list) {
+		if (entry.empty())
+			continue;
+		if ((!proc.empty() && proc.find(entry) != std::wstring::npos) ||
+		    (!title_l.empty() && title_l.find(entry) != std::wstring::npos))
+			return true;
+	}
+	return false;
 }
 
 /* Collected during a single EnumWindows pass. */
@@ -228,6 +251,9 @@ bool is_cloaked(HWND hwnd)
 struct EnumCtx {
 	std::vector<ss_shared_rect> rects;
 	std::vector<std::wstring> *blocklist;
+	std::vector<std::wstring> *allowlist; /* M7 */
+	bool allowlist_mode;                  /* M7 */
+	bool overflow;                        /* M7: rect budget exceeded */
 	ss_rect mons[SS_MAX_MONITORS]; /* refreshed each tick for the toast gate */
 	size_t num_mons;
 	bool mons_complete; /* false = truncated or partially resolved */
@@ -257,13 +283,25 @@ BOOL CALLBACK mon_enum_proc(HMONITOR hmon, HDC, LPRECT, LPARAM lp)
 BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 {
 	EnumCtx *ctx = reinterpret_cast<EnumCtx *>(lp);
-	if (ctx->rects.size() >= SS_MAX_RECTS)
+	if (ctx->rects.size() >= SS_MAX_RECTS) {
+		/* Budget exhausted: rects from here on are DROPPED. Never
+		 * silent (SPEC 2.7): publish mask_all so the render side
+		 * masks the whole source (allowlist mode's own default) or
+		 * masks what it has + chip (blocklist mode). Closes the M6
+		 * spec-guardian observation #3. */
+		ctx->overflow = true;
 		return FALSE;
+	}
 
 	if (!IsWindowVisible(hwnd))
 		return TRUE;
-	if (is_cloaked(hwnd))
+	CloakState cs = cloak_state(hwnd);
+	if (cs == CLOAK_YES)
 		return TRUE;
+	if (cs == CLOAK_UNKNOWN && !ctx->allowlist_mode)
+		return TRUE; /* blocklist: don't mask on doubt (SPEC 2.7) */
+	/* allowlist + CLOAK_UNKNOWN falls through: default-deny masks the
+	 * window unless it is approved (guardian M7 Q2). */
 
 	RECT rc;
 	if (!GetWindowRect(hwnd, &rc))
@@ -317,15 +355,18 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 		}
 	}
 
-	/* Blocklist: entry matches process image name OR title substring. */
-	for (const std::wstring &entry : *ctx->blocklist) {
-		if (entry.empty())
-			continue;
-		if ((!proc.empty() && proc.find(entry) != std::wstring::npos) ||
-		    (!title_l.empty() && title_l.find(entry) != std::wstring::npos)) {
+	if (ctx->allowlist_mode) {
+		/* Allowlist mode (M7, SPEC 2.3): every visible window that is
+		 * NOT approved gets a plate. No implicit approvals — shell
+		 * surfaces (taskbar, wallpaper) mask like any other window.
+		 * Toast cards above are exempt from this check by design:
+		 * approving a process never exempts its toasts. */
+		if (!matches_list(*ctx->allowlist, proc, title_l))
 			push(SS_RECT_WINDOW);
-			break;
-		}
+	} else {
+		/* Blocklist: entry matches process image name OR title. */
+		if (matches_list(*ctx->blocklist, proc, title_l))
+			push(SS_RECT_WINDOW);
 	}
 	return TRUE;
 }
@@ -388,11 +429,15 @@ void publish_tick(EnumCtx &ctx)
 {
 	ss_snapshot snap;
 	memset(&snap, 0, sizeof(snap));
+	bool enum_ok = false;
 
 	{
 		std::lock_guard<std::mutex> lk(g_cfg_mutex);
 		ctx.blocklist = &g_blocklist;
+		ctx.allowlist = &g_allowlist;
+		ctx.allowlist_mode = g_mode_allowlist;
 		ctx.rects.clear();
+		ctx.overflow = false;
 		ctx.num_mons = 0;
 		ctx.mons_complete = true;
 		if (!EnumDisplayMonitors(nullptr, nullptr, mon_enum_proc, reinterpret_cast<LPARAM>(&ctx)) ||
@@ -418,21 +463,46 @@ void publish_tick(EnumCtx &ctx)
 				obs_log(LOG_INFO, "watcher: monitor data restored; toast gate active");
 		}
 		pid_cache_begin_tick();
-		EnumWindows(enum_proc, reinterpret_cast<LPARAM>(&ctx));
+		enum_ok = EnumWindows(enum_proc, reinterpret_cast<LPARAM>(&ctx)) != FALSE;
 		pid_cache_end_tick();
+	}
+
+	/* EnumWindows returns FALSE either because our callback stopped it
+	 * (rect-budget overflow — legitimate, ctx.overflow is set) or
+	 * because enumeration genuinely FAILED. A failed pass has missing
+	 * rects; publishing it would silently pass unapproved windows in
+	 * allowlist mode (guardian M7 V1). Skip the publish instead: the
+	 * heartbeat only ever certifies a COMPLETED pass, so the render
+	 * side goes unverified within 500ms (allowlist -> mask-all,
+	 * blocklist -> chip). Never silent: transitions are logged. */
+	if (!enum_ok && !ctx.overflow) {
+		if (!g_enum_failed) {
+			g_enum_failed = true;
+			obs_log(LOG_WARNING, "watcher: EnumWindows FAILED; tick not published - "
+					     "render side goes unverified within 500ms");
+		}
+		return;
+	}
+	if (g_enum_failed) {
+		g_enum_failed = false;
+		obs_log(LOG_INFO, "watcher: window enumeration recovered");
 	}
 
 	/* Append the current password-field rect, if any. */
 	{
 		std::lock_guard<std::mutex> lk(g_pw_mutex);
-		if (g_pw_valid && ctx.rects.size() < SS_MAX_RECTS) {
-			ss_shared_rect r;
-			r.kind = SS_RECT_FIELD;
-			r.screen.x = (double)g_pw_rect.left;
-			r.screen.y = (double)g_pw_rect.top;
-			r.screen.w = (double)(g_pw_rect.right - g_pw_rect.left);
-			r.screen.h = (double)(g_pw_rect.bottom - g_pw_rect.top);
-			ctx.rects.push_back(r);
+		if (g_pw_valid) {
+			if (ctx.rects.size() < SS_MAX_RECTS) {
+				ss_shared_rect r;
+				r.kind = SS_RECT_FIELD;
+				r.screen.x = (double)g_pw_rect.left;
+				r.screen.y = (double)g_pw_rect.top;
+				r.screen.w = (double)(g_pw_rect.right - g_pw_rect.left);
+				r.screen.h = (double)(g_pw_rect.bottom - g_pw_rect.top);
+				ctx.rects.push_back(r);
+			} else {
+				ctx.overflow = true; /* dropped -> mask_all */
+			}
 		}
 	}
 
@@ -441,6 +511,8 @@ void publish_tick(EnumCtx &ctx)
 	for (size_t i = 0; i < n; i++)
 		snap.rects[i] = ctx.rects[i];
 	snap.detection_degraded = (ctx.num_mons == 0);
+	snap.allowlist_mode = ctx.allowlist_mode;
+	snap.mask_all = ctx.overflow;
 	snap.heartbeat_ns = os_gettime_ns();
 	ss_state_publish(&snap);
 }
@@ -603,16 +675,13 @@ void ss_watcher_stop(void)
 		CloseHandle(stop);
 }
 
-void ss_watcher_set_blocklist(const char *multiline_utf8)
+/* UTF-8 -> UTF-16, split on newlines, trim, lowercase. Shared by both
+ * lists (M7). Anonymous-namespace helper, so declared above use. */
+static std::vector<std::wstring> parse_multiline_utf8(const char *multiline_utf8)
 {
-	std::lock_guard<std::mutex> lk(g_cfg_mutex);
-	g_blocklist.clear();
-	if (!multiline_utf8 || !*multiline_utf8) {
-		for (const wchar_t *e : DEFAULT_BLOCKLIST)
-			g_blocklist.push_back(e);
-		return;
-	}
-	/* UTF-8 -> UTF-16, split on newlines, trim, lowercase. */
+	std::vector<std::wstring> out;
+	if (!multiline_utf8 || !*multiline_utf8)
+		return out;
 	int wlen = MultiByteToWideChar(CP_UTF8, 0, multiline_utf8, -1, nullptr, 0);
 	std::wstring all;
 	if (wlen > 0) {
@@ -628,14 +697,49 @@ void ss_watcher_set_blocklist(const char *multiline_utf8)
 		size_t b = line.find_first_not_of(L" \t");
 		size_t e = line.find_last_not_of(L" \t");
 		if (b != std::wstring::npos)
-			g_blocklist.push_back(to_lower(line.substr(b, e - b + 1)));
+			out.push_back(to_lower(line.substr(b, e - b + 1)));
 		if (nl == std::wstring::npos)
 			break;
 		start = nl + 1;
 	}
-	if (g_blocklist.empty())
+	return out;
+}
+
+void ss_watcher_set_blocklist(const char *multiline_utf8)
+{
+	std::vector<std::wstring> parsed = parse_multiline_utf8(multiline_utf8);
+	std::lock_guard<std::mutex> lk(g_cfg_mutex);
+	if (parsed.empty()) {
+		/* Empty blocklist falls back to the built-in defaults
+		 * (password managers + credential dialogs, SPEC Part 1). */
+		g_blocklist.clear();
 		for (const wchar_t *e : DEFAULT_BLOCKLIST)
 			g_blocklist.push_back(e);
+	} else {
+		g_blocklist = std::move(parsed);
+	}
+}
+
+void ss_watcher_set_allowlist(const char *multiline_utf8)
+{
+	std::vector<std::wstring> parsed = parse_multiline_utf8(multiline_utf8);
+	std::lock_guard<std::mutex> lk(g_cfg_mutex);
+	/* Deliberately NO default fallback: an empty allowlist approves
+	 * nothing (mask everything) — that is the mode's default-deny
+	 * promise (SPEC 2.3). */
+	g_allowlist = std::move(parsed);
+}
+
+void ss_watcher_set_mode_allowlist(bool allowlist)
+{
+	bool changed;
+	{
+		std::lock_guard<std::mutex> lk(g_cfg_mutex);
+		changed = (g_mode_allowlist != allowlist);
+		g_mode_allowlist = allowlist;
+	}
+	if (changed)
+		obs_log(LOG_INFO, "watcher: matching mode -> %s", allowlist ? "allowlist" : "blocklist");
 }
 
 const char *ss_watcher_default_blocklist_text(void)

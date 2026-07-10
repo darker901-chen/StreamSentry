@@ -59,6 +59,16 @@ struct ss_snapshot {
 	 * must surface the status chip (SPEC 2.7: failures are never
 	 * silent). */
 	bool detection_degraded;
+	/* Which mode produced these rects (M7, SPEC 2.3). In allowlist
+	 * mode a rect means "NOT approved -> mask"; a render side whose
+	 * configured mode disagrees must not trust the rects (one-tick
+	 * transient after a mode switch). */
+	bool allowlist_mode;
+	/* The enum pass hit the SS_MAX_RECTS budget: rects were dropped.
+	 * Allowlist mode: render side masks the whole source (the mode's
+	 * own default, SPEC 2.3). Blocklist mode: render side masks what
+	 * it has and surfaces the chip (SPEC 2.7: never silent). */
+	bool mask_all;
 	size_t num_rects;
 	struct ss_shared_rect rects[SS_MAX_RECTS];
 };

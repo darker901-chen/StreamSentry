@@ -771,7 +771,7 @@ frame-decide; SPEC.md "protection-inactive" adjectives updated to
   faithfully captures the owner's decision — that attestation is the
   owner's, at acceptance (item 6 below).
 
-### Manual acceptance — STATUS: PENDING (owner's pass; this is now the current checklist)
+### Manual acceptance — STATUS: PENDING (owner's pass; still current — the M7 section below ADDS the allowlist/panic items; run both)
 Items 1–3 and 6 are new or changed by M6.5; items 4–5 and 7–8 carry forward.
 Steps for the carried v0.1 items live in `reports/HUMAN_CHECKLIST.md`.
 1. **Degraded-chip check** — REPLACES the v0.1 "kill watcher (fault
@@ -823,3 +823,216 @@ Steps for the carried v0.1 items live in `reports/HUMAN_CHECKLIST.md`.
    second monitor / different DPI and on a scaled or cropped capture; the
    full 2-hour endurance soak; one glance that the filter entry reads
    **StreamSentry**.
+
+---
+
+## M7 — 2026-07-10 — Allowlist mode + panic hotkey (SPEC Part 2 items 2.3 + 2.4)
+
+### What was built
+- **Allowlist mode** (SPEC 2.3): a **Mode** dropdown (Blocklist / Allowlist)
+  in the filter settings. Blocklist is the default and a pre-M7 settings blob
+  resolves to blocklist — v0.1/M6 behavior is preserved on upgrade. In
+  allowlist mode every visible, non-cloaked top-level window that does NOT
+  match the approval list gets an opaque privacy plate; approved windows pass
+  through. Matching semantics are identical to the blocklist (owner ruling
+  a434b18: case-insensitive substring vs process image name OR window title).
+  The allowlist is stored under its own settings key — a mode switch never
+  reinterprets one list as the other, and the properties UI shows only the
+  active mode's textbox. An empty allowlist approves NOTHING (no default
+  fallback) and there are no implicit approvals: taskbar and wallpaper are
+  masked until explicitly approved. Toast and password detection stay active
+  in both modes — approving a process does NOT exempt its toasts.
+- **Allowlist failure direction**: any unverified frame (no snapshot, stale
+  heartbeat > 500 ms, mode-switch transient, unresolved capture geometry,
+  mapping failure, detection degraded, filter-begin failure) draws ONE
+  full-source opaque privacy plate instead of the source — the mode's own
+  opted-into default (default-deny), the designed exception under CLAUDE.md
+  rule 1. Blocklist mode keeps the M6.5 semantics everywhere (source renders
+  + chip; confident masks kept).
+- **Rect-budget overflow** (closes the guardian observation carried since
+  M5): more detections than the 64-rect snapshot budget → the watcher
+  publishes `mask_all`. Allowlist renders the full-source plate (the mode
+  default, no chip); blocklist keeps every rect it did publish and shows a
+  "detection overflow (some masks dropped)" chip + warning log — the cap is
+  no longer a silent drop in either mode.
+- **Panic hotkey** (SPEC 2.4): one OBS hotkey per filter instance,
+  "StreamSentry: mask everything (panic)", registered via
+  `obs_hotkey_register_source` (bound under OBS Settings → Hotkeys; no
+  properties-UI element), toggle semantics. Engaged → the render draws a
+  full-source opaque privacy plate INSTEAD of the target (the branch sits
+  before `process_filter_begin`, so the target is never composed into the
+  frame). The degraded chip stacks on top when the frame is simultaneously
+  unverified. Engage/release are logged; the engage log gains the suffix
+  "(filter currently disabled - takes effect when enabled)" when Enable is
+  off (guardian Q3). Not persisted across sessions.
+- **Guardian round-1 remediations** (all re-verified in round 2):
+  - V1: a genuine `EnumWindows` failure no longer publishes a normal-looking
+    tick — the tick is skipped (no snapshot, no heartbeat) and
+    transition-logged, so the render side goes unverified within 500 ms via
+    the existing stale trigger (allowlist → mask-all, blocklist → chip). The
+    heartbeat again certifies only a completed pass.
+  - V2: the `process_filter_begin`-failure branch is mode-aware — allowlist
+    with masks pending draws the full-source plate instead of skipping the
+    filter (default-deny no longer fails open on that path); blocklist keeps
+    skip + chip.
+  - Q1: allowlist + `detection_degraded` → mask-all (default-deny must not
+    depend on which processes the user approved — an approved toast host
+    would otherwise show a real toast during degradation). Blocklist +
+    degraded keeps the M6.5 V6 guarantee (confident masks + chip), now
+    pinned by its own unit case.
+  - Q2: the cloak query is tri-state and mode-aware — blocklist skips a
+    window whose DWMWA_CLOAKED query fails (no mask on doubt), allowlist
+    masks it unless approved (no confidence-less pass-through hole in
+    default-deny).
+- Tests: `frame-decide-tests` grew 25 → 55 assertions (10 M7 decision cases,
+  the allowlist-degraded flip, and a new blocklist-degraded companion);
+  `watcher-selftest` gained two allowlist legs. Six new locale strings.
+  `CMakeLists.txt` untouched (blob-identical to M6.5, verifier-pinned).
+
+### Automated evidence
+Sources: `reports/M7-verifier.md` (Verdict: VERIFIED — two full from-scratch
+runs: run 1 on the pre-audit tree, then the guardian's round-1 findings drove
+code changes and the RUN-2 ADDENDUM re-ran the entire sequence against the
+final staged tree pinned by blob hash; RUN-2 is authoritative) and
+`reports/M7-spec-guardian.md` (round-2 verdict: PASS), both 2026-07-10.
+- Commands (RUN-2, verbatim from the report):
+  ```
+  rm -rf F:/obsplugin/build_x64
+  cmake --preset windows-x64-local
+  cmake --build --preset windows-x64-local
+  cmake --preset windows-x64-local -DSTREAMSENTRY_PERF_LOG=ON
+  cmake --build --preset windows-x64-local
+  cmake --preset windows-x64-local -DSTREAMSENTRY_PERF_LOG=OFF
+  cmake --build --preset windows-x64-local
+  ctest -C RelWithDebInfo --output-on-failure          # cwd: F:/obsplugin/build_x64
+  ./coord-map-tests.exe; ./plate-gen-tests.exe; ./toast-gate-tests.exe; ./frame-decide-tests.exe
+  ./watcher-selftest.exe                               # cwd: build_x64/RelWithDebInfo
+  ```
+- Results (run 2, 2026-07-10 11:44–11:49): every configure/build exit 0 with
+  zero warnings in every compile/link log (EN + localized zh-TW patterns;
+  both `STREAMSENTRY_PERF_LOG` variants; tree left OFF — the shipping
+  configuration). The only warnings anywhere are the two known pre-existing
+  configure warnings from the vendored OBS sources in `.deps` (FindDetours
+  version / virtualcam GUID) — out-of-tree, not from this diff.
+- ctest 4/4 suites PASS; each executable also run directly, "all passed",
+  exit 0 — 137 static CHECK assertions total (coord-map 35, plate-gen 24,
+  toast-gate 23, frame-decide 55).
+- `watcher-selftest.exe` exit 0 — all deterministic legs pass, including the
+  two NEW allowlist legs: "allowlist mode masks unapproved windows (rects or
+  mask_all)" and "blocklist mode restored after switching back". The toast
+  leg is INCONCLUSIVE — expected: banners are still system-suppressed on
+  this machine (`reports/M6-toast-probe.txt`); not a regression.
+- Artifacts present in `build_x64/RelWithDebInfo/` (dll 74,752 B, final
+  PERF_LOG=OFF build). String check on the fresh dll: the run-2 strings
+  present ("EnumWindows FAILED", "takes effect when enabled", "PANIC engaged
+  by hotkey"), `PERF watcher tick` absent — the tree ships OFF.
+- Deployment: the owner-pass DLL at
+  `D:\software\obs\obs-studio\obs-plugins\64bit\streamsentry.dll` was
+  refreshed 2026-07-10 11:43 and corroborated as the M7-r2 PERF_LOG=ON build
+  (contains both r2-distinguishing strings AND the PERF string; byte size
+  equals the run's ON build — with the verifier's recorded caveat that
+  run-1's ON build had the same byte size, so the r2 identification rests on
+  the string evidence).
+
+### Gate history (two rounds; the round-1 FAIL is preserved verbatim in the guardian report)
+`reports/M7-spec-guardian.md` keeps both rounds; `reports/GATE-CATCHES.md`
+case 6 indexes the catch.
+1. Round 1 — FAIL, three violations plus three questions: **V1** a genuine
+   `EnumWindows` failure published a normal-looking snapshot (fresh
+   heartbeat, missing rects) — in allowlist mode a silent pass-through of
+   unapproved windows, the exact direction SPEC 2.3 forbids; **V2** the
+   filter-chain-bypass path showed unapproved windows chip-only in allowlist
+   instead of the mode's mask-all default (the staged ARCHITECTURE.md
+   contradicted the staged code); **V3** no TESTING.md note in the change
+   set (CLAUDE.md workflow rule, binding at landing per M2–M6.5 precedent).
+   **Q1** the degraded-only exception's justification failed for approved
+   toast hosts; **Q2** cloak-doubt skip = a confidence-less pass-through
+   hole in allowlist; **Q3** panic vs the Enable checkbox.
+2. Round 2 — PASS: V1 and V2 fixed in code and re-verified line-by-line
+   against the staged blobs (see remediations above); Q1–Q3 resolved with
+   recorded, principle-derived directions (Q1/Q2 in
+   `reports/RULING-2026-07-09-fail-open.md`, Application addendum 2 items
+   5–6; Q3 via the self-documenting log suffix). V3 was ACCEPTED as
+   satisfied-by-process with BINDING CONDITIONS: (a) the milestone commit
+   MUST include this TESTING.md M7 note — **this section fulfills that
+   condition**; (b) landing without it would void the PASS. Two further
+   conditions: the R1/R2 doc-only ARCHITECTURE.md corrections before commit
+   assembly (verified applied in the working tree — the test-infrastructure
+   frame-decide row and trigger-table row 8 now carry the corrected
+   wording), and re-staging the guardian report so the commit carries both
+   rounds verbatim.
+
+### Not covered by automation (from the verifier)
+- In-OBS panic behavior end-to-end: a real hotkey binding, next-frame plate
+  visibility, fresh-session reset, and the panic-while-disabled log suffix
+  all need a live OBS runtime.
+- Allowlist rendered pixels: approved-app-visible / others-plated,
+  taskbar/desktop plated until approved, the one-tick mode-switch transient,
+  more than 64 unapproved windows → single full-source plate, allowlist +
+  watcher killed → mask-all within 500 ms. The decision layer is unit-tested
+  against synthetic snapshots and the self-test proves live rect/mask_all
+  publication, but the pixels are owner-manual.
+- Properties-UI show/hide and the mode round-trip acceptance row (obs_data
+  settings need the OBS runtime; the separate keys were verified by
+  inspection).
+- The EnumWindows-failure skip-publish path and the CLOAK_UNKNOWN handling:
+  inspection + compilation only (the self-test cannot force those APIs to
+  fail); the resulting direction is covered generically via the stale-path
+  unit tests.
+- The mode-aware begin-failure branch and all render-path pixel drawing
+  (full-source plate, chip, per-rect plates, solid-fill fallback):
+  compile-verified only — only the pure modules are unit-tested.
+- Multi-instance last-writer-wins mode/list semantics: documented in
+  watcher.h, not exercised by automation.
+
+### Manual acceptance — STATUS: PENDING (owner's M7 pass; ADDS to the M6.5 checklist above — both lists are current)
+Items 1–5 are the SPEC v0.2 acceptance rows for 2.3/2.4; item 6 is blocked;
+items 7–8 are the residual/countersign records required by the guardian's
+round-2 PASS.
+1. **Allowlist basic (default-deny)**: set Mode = Allowlist and approve
+   exactly one app (one line, e.g. its process name) → that app is visible
+   and EVERY other window gets a per-window privacy plate — including the
+   taskbar and desktop/wallpaper, until explicitly approved (approving
+   `explorer.exe` is the expected way to unmask the shell).
+2. **Allowlist overflow**: with more unapproved windows than the 64-rect
+   budget, expect ONE full-source privacy plate (the mode's default — NOT
+   black, no chip).
+3. **Mode-switch round-trip**: fill both lists; switch blocklist → allowlist
+   → blocklist. Both textbox contents must survive untouched, and the
+   properties UI must show only the active mode's list. A one-tick "mode
+   transition pending" transient (chip; mask-all if the filter is in
+   allowlist mode) is expected at the switch itself.
+4. **Panic hotkey**: bind "StreamSentry: mask everything (panic)" in OBS
+   Settings → Hotkeys. Press → full-source opaque plate on the very next
+   frame INSTEAD of the source; press again → normal rendering. Check in
+   BOTH modes. Engage during fault injection (watcher killed) → the plate
+   STAYS and the degraded chip stacks on top. Restart OBS with panic
+   engaged → the fresh session starts released (not persisted).
+5. **Allowlist + watcher killed** (fault injection): in allowlist mode, kill
+   the watcher → full-source mask-all plate within ≤ 500 ms plus the
+   degraded chip — NOT black, NOT pass-through. (Blocklist mode keeps the
+   M6.5 behavior: source renders + chip.)
+6. **BLOCKED — toast exemption from approval** (SPEC 2.3): in allowlist mode
+   with the toast host approved (e.g. `explorer.exe`), a real toast banner
+   must STILL get the notification card — approval must not exempt toasts.
+   Blocked with the M6/M6.5 deferred real-toast items while banners are
+   system-suppressed on this machine; the M6 diagnostic note (split "banner
+   never displayed" from "detection missed it") applies unchanged.
+7. **Panic while disabled (Q3 residual)**: with the filter's Enable checkbox
+   OFF, toggling panic masks nothing until re-enabled; the engage log line
+   says so ("(filter currently disabled - takes effect when enabled)") and
+   panic takes effect on the next rendered frame once Enable is back on.
+8. **Owner countersign — M7 derivative rulings** (requested by the guardian;
+   same mechanism as the M6.5 item 6 countersign — sign both together):
+   - Q1: allowlist + detection-degraded → mask-all
+     (`reports/RULING-2026-07-09-fail-open.md`, Application addendum 2
+     item 5);
+   - Q2: cloak-query failure is mode-aware — blocklist skips on doubt,
+     allowlist masks unless approved — including the accepted guardian R3
+     residual: in allowlist mode a genuinely cloaked toast-signature window
+     whose cloak query fails may receive a toast card (mask-more, the mode's
+     bias) (addendum 2 item 6);
+   - Q3: the explicit Enable off-switch outranks panic (nothing is masked
+     while disabled); direction recorded in the guardian report, round 2.
+9. **Carried**: everything in the M6.5 checklist above (items 1–8) remains
+   open and current — M7 adds items rather than replacing any.
