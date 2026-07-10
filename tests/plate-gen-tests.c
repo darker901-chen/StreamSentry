@@ -83,8 +83,8 @@ static void test_privacy_plate_opacity(void)
 
 static void test_status_banner_fully_opaque(void)
 {
-	/* The fail-closed banner has square corners: every single pixel
-	 * must be opaque, inset 0. */
+	/* The status chip has square corners: every single pixel must be
+	 * opaque, inset 0. */
 	struct ss_image img;
 	CHECK(ss_gen_status_banner(&img));
 	CHECK(img.w > 200 && img.h >= 40);

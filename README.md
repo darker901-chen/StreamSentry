@@ -1,9 +1,10 @@
 # StreamSentry
 
-**Accident insurance for screen capture.** A Windows OBS Studio video
+**A privacy assist for screen capture.** A Windows OBS Studio video
 filter that deterministically masks the classic on-stream privacy
-accidents *before* they reach your capture — and blacks the whole output
-if it can't be sure it's working.
+accidents *before* they reach your capture — and clearly tells you
+(with an on-output status chip) whenever it cannot verify it is
+protecting you. It never interrupts your stream.
 
 > Status: **v0.1, pre-release.** The detection and masking pipeline is
 > built and machine-tested; several real-device checks are still a manual
@@ -22,8 +23,8 @@ before you notice:
    toggle, an autofill dropdown, or a legacy plaintext app.
 
 StreamSentry watches for these at the OS level and covers them with an
-opaque plate, or — if it can't verify it's healthy — blacks the entire
-source.
+opaque plate — and whenever it can't verify it's protecting you, it
+says so with a small on-output status chip instead of guessing.
 
 ## How it works, and why
 
@@ -33,20 +34,24 @@ property. There is no machine learning anywhere in this plugin. A privacy
 guarantee you can't audit isn't a guarantee; every masking decision here
 is traceable to an explicit OS-level rule.
 
-**Fail-closed is the product.** A single watcher thread owns detection and
-updates a heartbeat every tick. If the heartbeat goes stale (>500 ms), if
-coordinate mapping is uncertain, if the watcher thread dies, or if the
-capture geometry can't be resolved — the **entire filter output goes
-black** with a status banner. It starts black on load and only clears once
-detection is confirmed alive. This behavior **cannot be turned off**;
-there is no setting for it. Failing open would defeat the entire purpose.
+**Masks only when confident — and says so when it isn't.** A single
+watcher thread owns detection and updates a heartbeat every tick. Masks
+are drawn only when both the detection and the coordinate mapping are
+confident; StreamSentry never guesses a mask position and never
+disrupts your output. If the heartbeat goes stale (>500 ms), the
+watcher dies, or the capture geometry can't be resolved, your stream
+keeps rendering normally and a small opaque **"protection degraded"
+chip** appears on the output (plus an OBS log line) until protection
+verifies again. The chip **cannot be turned off** — you always know
+when you are unprotected. (Design decision 2026-07-09: a wrong or
+disruptive mask is worse than a missed one; this replaced the v0.1
+full-blackout behavior.)
 
 **Opaque, never blur.** Masks are solid, opaque plates — a notification
 card for toasts, a dark privacy plate (lock icon) for windows and password
 fields. StreamSentry **never blurs or pixelates**, because blur and mosaic
 are *reversible*: an archived clip can be attacked offline with deblurring
-tools. Opaque is the only honest guarantee. Raw black is reserved solely
-for the fail-closed state.
+tools. Opaque is the only honest guarantee.
 
 ## Requirements
 
@@ -79,8 +84,8 @@ for locally-built, unsigned binaries.
      plate. Pre-filled with sensible defaults (password managers and
      credential dialogs). Leave a line empty / clear the box to fall back
      to the built-in defaults.
-   - There is deliberately **no** option to disable the fail-closed
-     blackout.
+   - There is deliberately **no** option to disable the "protection
+     degraded" status chip.
 
 Toast masking and password-field masking are always on while the filter
 is enabled; they need no configuration.
@@ -89,16 +94,17 @@ is enabled; they need no configuration.
 
 StreamSentry is honest about what it does not do. In v0.1:
 
-- **Display Capture only, unscaled, full-monitor.** Coordinate mapping in
-  v0.1 resolves geometry only for an unscaled full-monitor Display
-  Capture. A **Window Capture**, a scaled/cropped capture, or two monitors
-  of *identical resolution* cannot be resolved with certainty, so the
-  filter **fails closed** (black) rather than risk placing a mask in the
-  wrong spot.
-- **Toast over-masking.** On Windows 11 the toast host window class is
-  shared with other XAML popups (Start-menu search, taskbar flyouts), so
-  those may also get a notification card. This is deliberate — over-mask,
-  never under-mask.
+- **Masking works on unscaled full-monitor Display Capture.** A
+  **Window Capture**, a scaled/cropped capture, or two monitors of
+  *identical resolution* cannot be mapped with certainty — those
+  sources render normally, and while something needs masking the
+  "protection degraded" chip shows instead (StreamSentry never guesses
+  a mask position).
+- **Toast matching is geometry-narrowed.** On Windows 11 the toast host
+  window class is shared with other XAML popups (Start-menu search,
+  taskbar flyouts); a geometry gate (right-edge band + size bounds)
+  keeps notification cards off those. Some right-edge flyouts of
+  toast-like size may still get a card.
 - **UAC / credential prompts on the secure desktop** are not capturable by
   OBS at all, so they cannot appear in your stream to begin with (the
   credential broker on the normal desktop *is* covered by the blocklist).
@@ -152,9 +158,11 @@ Pure-logic modules (coordinate mapping, plate generation) have unit tests:
 all you need (plus [LICENSE](LICENSE)).
 
 **Reading or modifying the code?** Start with
-[ARCHITECTURE.md](ARCHITECTURE.md) (how it is actually built),
-[SPEC.md](SPEC.md) (what it must do, and what is deliberately out of
-scope), and [TESTING.md](TESTING.md) (what has been verified, and how).
+[ARCHITECTURE.md](ARCHITECTURE.md) (how it is actually built, including
+the multi-agent gate workflow — verifier / spec-guardian / scribe —
+that every milestone must pass), [SPEC.md](SPEC.md) (what it must do,
+and what is deliberately out of scope), and [TESTING.md](TESTING.md)
+(what has been verified, and how).
 
 **Everything else is internal project process** — you can safely ignore
 it: [CLAUDE.md](CLAUDE.md) (iron rules for the AI-assisted workflow that

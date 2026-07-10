@@ -60,7 +60,7 @@ uint64_t os_gettime_ns(void);
 static const DWORD WATCH_TICK_MS = 150;
 
 /* Early-warning threshold for a slow tick (SPEC 2.1): half the render
- * side's 500ms fail-closed stale threshold. Always compiled, not just
+ * side's 500ms detection-stale threshold. Always compiled, not just
  * perf builds — one LOG_WARNING per offending tick. */
 static const uint64_t TICK_WARN_NS = 250000000ULL;
 
@@ -70,9 +70,11 @@ static const uint64_t TICK_WARN_NS = 250000000ULL;
  * REPLACES SPEC.md's Win10-era example (ShellExperienceHost CoreWindow),
  * which does not host the toast on Win11. Signature = process AND class
  * (CLAUDE.md). Known over-match: explorer also uses this class for other
- * XAML flyouts (Start search, taskbar popups); per iron rule 1 we
- * over-mask those rather than risk missing a toast. Phantom 0x0 popups
- * are filtered by the visible/non-cloaked/non-empty gate below. */
+ * XAML flyouts (Start search, taskbar popups); the geometry gate
+ * (toast-gate, SPEC 2.2) narrows that over-match, and the residual
+ * (right-edge flyovers of toast-like size) is accepted rather than
+ * risking a missed toast. Phantom 0x0 popups are filtered by the
+ * visible/non-cloaked/non-empty gate below. */
 static const wchar_t *TOAST_PROC = L"explorer.exe";
 static const wchar_t *TOAST_CLASS = L"xaml_windowedpopupclass";
 
@@ -104,6 +106,8 @@ std::mutex g_pw_mutex;          /* guards password-field rect */
 bool g_pw_valid = false;
 RECT g_pw_rect = {0, 0, 0, 0};
 
+bool g_mons_degraded = false;   /* watcher-thread-only: transition logging */
+
 std::wstring to_lower(std::wstring s)
 {
 	std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return (wchar_t)towlower(c); });
@@ -130,8 +134,9 @@ std::wstring proc_image_name(DWORD pid)
 /* PID -> image-name cache (M6, SPEC 2.1). v0.1 called OpenProcess +
  * QueryFullProcessImageNameW for EVERY visible window EVERY tick; under
  * streaming load that is the suspected cause of the rare >500ms ticks
- * that tripped fail-closed. With the cache, the OS is queried only for
- * PIDs not observed in the previous tick.
+ * that tripped the v0.1 fail-closed blackout (now the degraded chip).
+ * With the cache, the OS is queried only for PIDs not observed in the
+ * previous tick.
  *
  * Owned exclusively by the watcher thread (EnumWindows runs
  * synchronously on it) — no locking.
@@ -210,7 +215,11 @@ bool is_cloaked(HWND hwnd)
 	int cloaked = 0;
 	if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))))
 		return cloaked != 0;
-	return false;
+	/* Query failure -> treat as cloaked (skip). We cannot confirm the
+	 * window is actually displayed, and a plate over a not-displayed
+	 * window would be a wrong mask (SPEC 2.7: mask only on confidence;
+	 * supersedes the v0.1 report-on-doubt direction). */
+	return true;
 }
 
 /* Collected during a single EnumWindows pass. */
@@ -294,7 +303,8 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 	 * (M6, SPEC 2.2). Gate-failed windows are NOT dropped — they fall
 	 * through to block/allowlist matching like any other window, the
 	 * gate only removes the toast-card over-masking. With no monitor
-	 * data the gate classifies as toast (over-mask-safe). */
+	 * data the gate cannot affirm and classifies as not-a-toast
+	 * (SPEC 2.7: mask only on confidence). */
 	if (proc == TOAST_PROC && cls_l == TOAST_CLASS) {
 		ss_rect win;
 		win.x = (double)rc.left;
@@ -387,12 +397,25 @@ void publish_tick(EnumCtx &ctx)
 		ctx.mons_complete = true;
 		if (!EnumDisplayMonitors(nullptr, nullptr, mon_enum_proc, reinterpret_cast<LPARAM>(&ctx)) ||
 		    !ctx.mons_complete) {
-			/* Incomplete monitor data must not flip the gate's failure
-			 * direction: a toast on an unlisted monitor would fail the
-			 * overlap test and go UNMASKED. Present the gate with an
-			 * empty list instead — it then classifies every signature
-			 * match as a toast (over-mask, iron rule 1 direction). */
+			/* Never evaluate the gate against PARTIAL monitor data —
+			 * that would give confident-looking wrong answers (e.g. a
+			 * toast on an unlisted monitor failing the overlap test).
+			 * Present an empty list instead: the gate then refuses to
+			 * affirm anything (not-a-toast, SPEC 2.7). */
 			ctx.num_mons = 0;
+		}
+		/* SPEC 2.7: this degradation must never be silent — publish it
+		 * (render side shows the status chip) and log transitions. */
+		bool degraded = (ctx.num_mons == 0);
+		if (degraded != g_mons_degraded) {
+			g_mons_degraded = degraded;
+			if (degraded)
+				obs_log(LOG_WARNING,
+					"watcher: monitor enumeration failed/truncated; toast "
+					"geometry gate cannot affirm (toast cards suppressed) - "
+					"render side will show the protection-degraded chip");
+			else
+				obs_log(LOG_INFO, "watcher: monitor data restored; toast gate active");
 		}
 		pid_cache_begin_tick();
 		EnumWindows(enum_proc, reinterpret_cast<LPARAM>(&ctx));
@@ -417,6 +440,7 @@ void publish_tick(EnumCtx &ctx)
 	snap.num_rects = n;
 	for (size_t i = 0; i < n; i++)
 		snap.rects[i] = ctx.rects[i];
+	snap.detection_degraded = (ctx.num_mons == 0);
 	snap.heartbeat_ns = os_gettime_ns();
 	ss_state_publish(&snap);
 }
@@ -462,12 +486,12 @@ DWORD WINAPI watcher_thread(LPVOID)
 			uint64_t dur = os_gettime_ns() - t0;
 
 			/* Always compiled (SPEC 2.1): a slow tick is the precursor
-			 * of a stale-heartbeat fail-closed; surface it in the OBS
-			 * log while it is still only a near-miss. */
+			 * of stale-heartbeat protection degradation; surface it in
+			 * the OBS log while it is still only a near-miss. */
 			if (dur > TICK_WARN_NS)
 				obs_log(LOG_WARNING,
 					"watcher tick took %llu ms (early warning; "
-					"fail-closed stale threshold is 500 ms)",
+					"detection-stale threshold is 500 ms)",
 					(unsigned long long)(dur / 1000000ULL));
 
 #ifdef STREAMSENTRY_PERF_LOG
@@ -497,7 +521,8 @@ DWORD WINAPI watcher_thread(LPVOID)
 #endif
 		}
 		/* When killed we intentionally neither publish nor beat the
-		 * heartbeat, so the render side fails closed within 500ms. */
+		 * heartbeat, so the render side reports protection degraded
+		 * within 500ms. */
 		if (WaitForSingleObject(g_stop_event, WATCH_TICK_MS) == WAIT_OBJECT_0)
 			break;
 	}
@@ -545,7 +570,7 @@ void ss_watcher_start(void)
 	g_thread = CreateThread(nullptr, 0, watcher_thread, nullptr, 0, nullptr);
 	if (!g_thread) {
 		obs_log(LOG_ERROR, "watcher: CreateThread failed; detection unavailable "
-				   "(render side will fail closed)");
+				   "(render side will show the protection-degraded chip)");
 		if (g_stop_event) {
 			CloseHandle(g_stop_event);
 			g_stop_event = nullptr;

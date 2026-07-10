@@ -63,7 +63,7 @@ bool ss_resolve_capture_geom(obs_source_t *target, struct ss_capture_geom *out)
 
 	const char *id = obs_source_get_id(target);
 	if (!is_monitor_capture(id))
-		return false; /* unsupported source type -> caller fails closed */
+		return false; /* unsupported source type -> caller renders degraded */
 
 	uint32_t base_w = obs_source_get_base_width(target);
 	uint32_t base_h = obs_source_get_base_height(target);
@@ -85,11 +85,11 @@ bool ss_resolve_capture_geom(obs_source_t *target, struct ss_capture_geom *out)
 	 * EnumDisplayMonitors entry) is not guaranteed to match this
 	 * enumeration order, and a same-resolution neighbour would pass a
 	 * size check while giving the WRONG origin -> a mask placed off the
-	 * sensitive region. Per iron rule 1 that under-mask is unacceptable,
-	 * so an ambiguous match (two identical-resolution monitors, or none
-	 * matching) resolves to failure and the caller fails closed.
-	 * Limitation: dual identical-resolution monitors are not
-	 * distinguishable here in v0.1 (documented). */
+	 * sensitive region. That is exactly the wrong-mask SPEC 2.7
+	 * forbids, so an ambiguous match (two identical-resolution
+	 * monitors, or none matching) resolves to failure and the caller
+	 * renders degraded (chip). Limitation: dual identical-resolution
+	 * monitors are not distinguishable here in v0.1 (documented). */
 	int match = -1, matches = 0;
 	for (int i = 0; i < list.count; i++) {
 		long mw = list.mons[i].rc.right - list.mons[i].rc.left;

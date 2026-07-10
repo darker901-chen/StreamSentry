@@ -171,9 +171,9 @@ int main()
 	/* ---- fault injection: kill -> heartbeat freezes ---- */
 	uint64_t before_kill = read_heartbeat();
 	ss_watcher_debug_set_killed(true);
-	Sleep(650); /* > 500ms fail-closed threshold */
+	Sleep(650); /* > 500ms detection-stale threshold */
 	uint64_t after_kill = read_heartbeat();
-	CHECK(after_kill == before_kill, "heartbeat frozen while killed (>500ms) -> render fails closed");
+	CHECK(after_kill == before_kill, "heartbeat frozen while killed (>500ms) -> render shows protection-degraded chip");
 
 	ss_watcher_debug_set_killed(false);
 	Sleep(400);

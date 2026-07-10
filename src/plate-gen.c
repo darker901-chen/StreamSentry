@@ -302,7 +302,7 @@ bool ss_gen_privacy_plate(uint32_t w, uint32_t h, struct ss_image *out)
 
 bool ss_gen_status_banner(struct ss_image *out)
 {
-	const char *label = "Privacy guard: detection unavailable - output blocked";
+	const char *label = "StreamSentry: protection degraded - see log";
 	const uint32_t scale = 2;
 	uint32_t tw = text_width(scale, label);
 	uint32_t w = tw + 48;

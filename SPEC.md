@@ -22,10 +22,10 @@ v0.1 baseline + the v0.2 items below, nothing else.
 - Healthy + rects present, two opaque styles by rect type:
   - **Toast rects**: draw a **notification-shaped placeholder card** — rounded rect sized to the toast, bell icon, "Notification hidden" label. Reads as a native feature, not a glitch.
   - **Window / password-field rects**: draw a **privacy plate** — dark solid fill + lock icon + "Hidden" label.
-- **Never blur, never pixelate/mosaic** — archived clips can be attacked offline with deblur/depixelation tools; opaque is the only honest guarantee. Raw black is reserved solely for the fail-closed state.
-- Unhealthy / mapping failure / watcher thread death: **entire filter output black** + overlay text "Privacy guard: detection unavailable — output blocked".
-- Rule: any uncertainty = black. Over-mask with 8–16px padding around rects.
-- Toast windows are UWP-hosted: a toast window can exist while DWM-cloaked (not actually visible). Check `DWMWA_CLOAKED` + visibility before reporting, but when in doubt, report (over-mask).
+- **Never blur, never pixelate/mosaic** — archived clips can be attacked offline with deblur/depixelation tools; opaque is the only honest guarantee. Raw black is reserved solely for the fail-closed state. *(Raw-black reservation obsolete since §2.7 removed the blackout.)*
+- Unhealthy / mapping failure / watcher thread death: **entire filter output black** + overlay text "Privacy guard: detection unavailable — output blocked". *(SUPERSEDED 2026-07-09 by owner ruling — see Part 2 §2.7: render unmodified + failure chip; blackout removed.)*
+- Rule: any uncertainty = black. Over-mask with 8–16px padding around rects. *(SUPERSEDED — §2.7: uncertainty = don't mask + tell the user; padding stays for confident detections only.)*
+- Toast windows are UWP-hosted: a toast window can exist while DWM-cloaked (not actually visible). Check `DWMWA_CLOAKED` + visibility before reporting, but when in doubt, report (over-mask). *(SUPERSEDED by §2.7: when the cloak state cannot be queried the window is treated as cloaked and skipped — a plate over a window that is not actually displayed would be a wrong mask.)*
 
 ## Coordinate mapping
 Screen coords → source coords → canvas coords. Must handle:
@@ -37,7 +37,7 @@ Screen coords → source coords → canvas coords. Must handle:
 ## Settings UI (minimal)
 - Enable/disable checkbox
 - Blocklist: multi-line text box (one process name or title substring per line)
-- No option to disable fail-closed behavior
+- No option to disable fail-closed behavior *(SUPERSEDED by §2.7: the blackout itself is removed; the failure status chip is likewise not disableable)*
 
 ## Out of scope for v0.1
 macOS; blur/mosaic; per-app policies; **allowlist mode** (only-approved-apps-visible — v0.2 headline); Focus Assist auto-DND integration (v0.2); content-level secret detection (.env / API keys — impossible deterministically, permanently out; documented as a limitation); AI detection of any kind; tray icon; auto-update; localization; OBS < 30.
@@ -60,7 +60,7 @@ macOS; blur/mosaic; per-app policies; **allowlist mode** (only-approved-apps-vis
 | 1Password / KeePass window open | Full-window plate (blocklist) |
 | Password field on second monitor with different DPI | Correct coordinates |
 | Source has scale/crop transform | Mask lands correctly |
-| Kill UIA watcher thread (fault injection) | Full black within ≤500ms + status text |
+| Kill UIA watcher thread (fault injection) | Full black within ≤500ms + status text *(§2.7: now source keeps rendering + status chip ≤500ms)* |
 | Toggle plugin during 60fps recording | No visible frame drops (measure render time) |
 | 2-hour idle run | No memory leak (stable working set) |
 | Empty blocklist + no password field | Fully transparent pass-through |
@@ -68,9 +68,10 @@ macOS; blur/mosaic; per-app policies; **allowlist mode** (only-approved-apps-vis
 # Part 2 — v0.2 additions (approved 2026-07-05)
 
 Driven by owner field-testing of v0.1 (findings in
-reports/V02-PLAN.md). Five items, mapped to milestones M6–M8. All v0.1
-iron rules apply unchanged; in particular every feature below must
-preserve fail-closed semantics and opaque-only masking.
+reports/V02-PLAN.md). Five items, mapped to milestones M6–M8, plus the
+§2.7 repositioning ruled mid-v0.2. Iron rules apply as amended
+2026-07-09: never disrupt the output, mask only on confidence (§2.7),
+and drawn masks stay opaque-only.
 
 ## 2.1 Watcher performance hardening (M6)
 
@@ -96,7 +97,8 @@ visible window.
   publish. Do NOT touch the heartbeat mid-tick to paper over slow
   ticks (`ss_state_touch_heartbeat` stays caller-free).
 - Acceptance: 30-min streaming soak with a busy desktop → zero
-  stale-heartbeat fail-closed events; measured tick p99 recorded in
+  stale-heartbeat events (formerly fail-closed blackouts, §2.7: now
+  protection-degraded chip occurrences); measured tick p99 recorded in
   reports/ (target: p99 ≤ 50ms).
 
 ## 2.2 Toast-match narrowing by geometry (M6)
@@ -147,12 +149,13 @@ marking, not in any list). Structural fix: invert the default.
 - **Rect-budget overflow**: if maskable windows exceed `SS_MAX_RECTS`,
   the watcher publishes a `mask_all` flag in the snapshot; the render
   side then draws one full-source **privacy plate** (opaque, lock +
-  "Hidden" — NOT raw black, which stays reserved for fail-closed).
-  Over-mask, never drop rects silently.
-- Fail-closed semantics **unchanged** in allowlist mode: stale
-  heartbeat / unresolved geometry / mapping failure → full black +
-  banner, exactly as v0.1. (Allowlist only changes *which* rects are
-  reported, not health semantics.)
+  "Hidden"). Never drop rects silently — mask-all is this mode's
+  default state, not a blackout.
+- Failure semantics in allowlist mode (§2.7): stale heartbeat /
+  unresolved geometry / mapping failure → full-source **mask-all
+  plate** + status chip. Default-deny is what this user opted into,
+  so the mode fails toward its own default — never raw black, never
+  silent pass-through.
 - Storage: `blocklist` and `allowlist` are **separate settings keys**;
   switching modes must never reinterpret one list as the other
   (inverted meaning would be a security bug). Allowlist default:
@@ -165,16 +168,17 @@ marking, not in any list). Structural fix: invert the default.
   no properties-UI element): **"StreamSentry: mask everything
   (panic)"**, toggle semantics.
 - Engaged → render a full-source **privacy plate** (opaque, lock +
-  "Hidden") instead of the target; released → normal pipeline.
-  Distinct from fail-closed black so the streamer can tell "I pressed
-  panic" from "detection died" at a glance; if both apply, fail-closed
-  (black + banner) wins so health stays observable.
+  "Hidden") instead of the target; released → normal pipeline. A
+  deliberate user action outranks health state (§2.7): if protection
+  is simultaneously unverified, the panic plate stays and the status
+  chip is drawn on top of it, so the streamer still learns the guard
+  is inactive.
 - Not persisted across OBS sessions: a fresh session starts with panic
   released (a forgotten invisible global mask across sessions
-  surprises the user; fail-closed — not panic — is the safety net).
+  surprises the user).
 - Acceptance: hotkey engages within one frame (mask visible on the
   very next rendered frame), toggles cleanly, works in both modes, and
-  fail-closed still overrides it.
+  stays engaged during injected watcher death (chip on top).
 
 ## 2.5 Window-picker UI (M8)
 
@@ -205,6 +209,44 @@ matrix in README/TESTING. **Documentation-only unless a deterministic,
 dependency-free activation exists**; no speculative code. This item
 does not gate the v0.2 release.
 
+## 2.7 Fail-open repositioning (owner ruling 2026-07-09, FINAL)
+
+Ruling record: reports/RULING-2026-07-09-fail-open.md. The product is a
+privacy **assist**: wrong masking is worse than under-masking, and the
+plugin must never disrupt the user's output. Supersedes the v0.1
+fail-closed blackout everywhere.
+
+- **Mask only on confidence.** A mask (or an allowlist pass-through
+  hole) is drawn only when detection and coordinate mapping are both
+  confident. Nothing is ever drawn at a guessed position.
+- **Unverified protection → render unmodified + tell the user.**
+  Stale heartbeat (> 500ms), dead watcher, unresolved capture geometry
+  (window capture, scaled capture, ambiguous monitors), or mapping
+  failure: the source renders untouched; a small opaque status chip
+  ("StreamSentry: protection degraded — see log") is drawn in a corner
+  of the output and the condition is logged. Chip and log clear when
+  protection verifies again. Full-frame blackout no longer exists.
+  Watcher-side degradations that do NOT stall the heartbeat (e.g.
+  monitor enumeration failure disabling the toast gate) publish a
+  `detection_degraded` flag in the snapshot so the render side still
+  shows the chip — **no degradation is ever silent**.
+- **Confident masks keep all v0.1 guarantees**: opaque, padded,
+  correct styles. If plate texture creation fails for a confident
+  rect, fall back to a solid opaque fill (never drop a confident
+  mask, never blur).
+- **Allowlist mode exception (by design, not by uncertainty):**
+  allowlist mode's failure state is its own default — mask-all —
+  because default-deny is the behavior that user opted into. Approved
+  holes are only punched with confident mapping.
+- **Toast gate direction flips**: geometry-gate uncertainty (missing/
+  incomplete monitor data, degenerate input) now classifies as NOT a
+  toast — no mask — instead of over-masking.
+- Acceptance-matrix changes: the v0.1 "kill watcher → full black
+  ≤ 500ms" row becomes "kill watcher → source keeps rendering +
+  status chip visible ≤ 500ms + log line". The v0.2 allowlist
+  fault-injection row becomes "allowlist + watcher killed → mask-all
+  plate (not black)".
+
 ## Out of scope for v0.2
 
 Everything in the v0.1 out-of-scope list that is not explicitly pulled
@@ -219,13 +261,13 @@ localization; OBS < 30; window/game-capture geometry support.
 
 | Scenario | Expected |
 |---|---|
-| 30-min SRT streaming soak, busy desktop | Zero stale-heartbeat fail-closed events; tick p99 ≤ 50ms recorded |
+| 30-min SRT streaming soak, busy desktop | Zero stale-heartbeat protection-degraded events; tick p99 ≤ 50ms recorded |
 | Start search / taskbar flyouts / tray overflow opened | No toast-plate storm |
 | Real toast during the above | Still masked before content readable |
 | Allowlist mode, one approved app | Approved app visible; every other window plated |
 | Allowlist mode, > `SS_MAX_RECTS` unapproved windows | Single full-source privacy plate (not black) |
-| Allowlist mode, watcher killed (fault injection) | Full black + banner ≤ 500ms (unchanged) |
+| Allowlist mode, watcher killed (fault injection) | Full-source mask-all plate ≤ 500ms (§2.7: the mode's own default, not black) |
 | Mode switch round-trip | Blocklist and allowlist contents both survive untouched |
 | Panic hotkey pressed / released | Full-source plate next frame / normal render resumes |
-| Panic + watcher killed | Fail-closed black + banner wins |
+| Panic + watcher killed | Panic plate stays (deliberate user action outranks health state); status chip on top |
 | Picker: add open window, no typing | Entry appended to active list; mask behavior updates |

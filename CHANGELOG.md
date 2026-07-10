@@ -9,6 +9,108 @@ Two unreleased sets live here, newest first: the v0.2 development cycle
 (M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
 Nothing has been pushed or tagged; publishing is a human step.
 
+### 0.2.0-m6.5 - 2026-07-10
+
+Milestone M6.5 repositions the product's failure behavior on an owner product
+ruling (2026-07-09, recorded FINAL with its Application addendum in
+`reports/RULING-2026-07-09-fail-open.md`): the plugin is a privacy
+**assist** — wrong masking is worse than under-masking and the plugin must
+never disrupt the user's output — so the v0.1 fail-closed full-frame
+blackout is removed. When protection cannot be verified, the source now
+renders unmodified and the plugin tells the user instead: a small opaque
+top-left status chip ("StreamSentry: protection degraded - see log") plus
+one `PROTECTION DEGRADED: <reason>` warning in the OBS log per engagement,
+clearing with a `protection restored` line. Masks are drawn only on
+confidence, and confidently detected-and-mapped masks are never dropped —
+not even on degraded frames. The change set at the final gate is 26 files;
+no version bump (still builds as `streamsentry.dll` 0.1.0). Verified by
+`reports/M6.5-verifier.md` (FINAL VERDICT: VERIFIED — the tree was amended
+twice by gate findings and the full from-scratch sequence was re-run for
+each revision, pinned by blob hash; the RUN-3 ADDENDUM is authoritative:
+zero-warning builds in both `STREAMSENTRY_PERF_LOG` variants with the tree
+left OFF, ctest 4/4 suites — 107 assertions, watcher-selftest deterministic
+legs all pass with the expected INCONCLUSIVE toast leg) and
+`reports/M6.5-spec-guardian.md` (ROUND-3 VERDICT: PASS; the report preserves
+its first-pass FAIL — five violations, including the guardian's own
+checklist still mandating blackout — and its round-2 FAIL — V6, the first
+fix dropping confident masks — verbatim; `reports/GATE-CATCHES.md` indexes
+these catches). After the PASS, three doc-only wording fixes from the
+guardian's own non-blocking round-3 list were applied; no code changed after
+the final verification run.
+
+#### Added
+- Pure per-frame decision module `src/frame-decide.c`/`.h`: the entire
+  render-side decision (no-snapshot/stale → detection-degraded → geometry →
+  per-rect mapping, first-trigger reason precedence) extracted from
+  `src/filter.c` after guardian finding V6 so the logic is unit-testable; it
+  includes no OBS or Windows headers.
+- Fourth ctest suite `frame-decide-tests` (`tests/frame-decide-tests.c`, 25
+  assertions) pinning the V6 regression — `detection_degraded` plus a
+  confident rect must flag the frame (chip) WITHOUT dropping the mask — plus
+  failure-reason precedence ordering, stale-heartbeat-drops-all-masks,
+  INVALID-among-OK keeps the OK rect, and off-capture silent skip.
+- Watcher `detection_degraded` flag in the published snapshot (guardian
+  finding V1): monitor-enumeration failure or truncation — which leaves the
+  toast gate unable to affirm — now surfaces the chip and logs the
+  engage/clear transitions once each, instead of silently stopping toast
+  masking while the heartbeat stays fresh. No degradation is silent.
+- `reports/RULING-2026-07-09-fail-open.md`: the ruling record plus its
+  Application addendum (the authority chain for the cloak-doubt flip, the
+  chip-label generalization, and the guardian-checklist amendment — all
+  flagged for owner countersign at the manual acceptance pass).
+
+#### Changed
+- Unverified protection (stale heartbeat > 500 ms, missing snapshot,
+  unresolved capture geometry, mapping failure, filter-begin bypass) now
+  renders the source unmodified with the status chip and the WARN/INFO log
+  pair described above. Log-string migration for anyone grepping OBS logs:
+  `FAIL-CLOSED engaged: ...` → `PROTECTION DEGRADED: ...`; the always-on
+  slow-tick warning now reads "(early warning; detection-stale threshold is
+  500 ms)"; the `PERF watcher tick` format is unchanged.
+- Confident rects keep their opaque plates on degraded frames; plate-texture
+  allocation failure for a confident rect now falls back to a solid opaque
+  fill at the mapped rect instead of engaging a full-frame failure state.
+- Toast geometry gate direction flipped: uncertainty (missing or incomplete
+  monitor data, degenerate geometry) now classifies as NOT a toast — no
+  mask — instead of M6's over-mask. The five uncertainty assertions in
+  `tests/toast-gate-tests.c` are inverted, with the NaN fixture strengthened
+  so the case stays discriminating under the new rule.
+- Cloak-query failure direction flipped: a window whose `DWMWA_CLOAKED`
+  state cannot be queried is treated as cloaked and skipped (was: reported /
+  over-masked) — a plate over a window that is not actually displayed would
+  be a wrong mask.
+- Law and docs amended under the ruling's authority: CLAUDE.md iron rules 1
+  and 3 rewritten; SPEC.md Part 2 gains §2.7 with superseded notes on the
+  affected Part 1 lines and amended acceptance rows (the kill-watcher row is
+  now "source keeps rendering + status chip ≤ 500 ms + log line");
+  ARCHITECTURE.md failure semantics rewritten and the multi-agent gate
+  workflow documented; README repositioned (assist, chip, no blackout
+  claims); the spec-guardian agent checklist's "failure paths must land in
+  blackout" bullet replaced by failure-notice integrity.
+
+#### Removed
+- The fail-closed full-frame blackout and its status banner: no path draws
+  raw black anymore (`gs_clear` absent from `src/`; the old full-black fill
+  is gone — guardian §2). The 500 ms staleness constant survives; it now
+  gates the failure notice instead of a blackout.
+
+#### Dependencies
+- Unchanged: libobs + Windows SDK only (guardian §5); `CMakeLists.txt`
+  changes are limited to wiring the new module and test target. The new
+  test binary links only pure first-party sources.
+
+#### Pending owner acceptance (binding for the v0.2 ship)
+- In-OBS degraded-chip behavior: chip within ≤ 500 ms of watcher death,
+  clears on recovery, and confident masks persist on degraded frames — the
+  render-path pixels have no automated harness. See TESTING.md (M6.5) for
+  the current checklist.
+- The M6 soak and flyout rows carry forward with the renamed grep targets;
+  the deferred real-toast items remain blocked while toast banners are
+  system-suppressed on the dev machine.
+- Owner countersign of the ruling's Application addendum items and the Q1
+  per-window residual (a visible window whose cloak query persistently
+  fails is skipped without a notice), as requested by the spec-guardian.
+
 ### 0.2.0-m6 - 2026-07-09
 
 Milestone M6 is the first v0.2 code milestone: watcher performance hardening

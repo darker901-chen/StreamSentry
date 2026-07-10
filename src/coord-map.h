@@ -57,14 +57,15 @@ struct ss_capture_geom {
 enum ss_map_result {
 	SS_MAP_OK = 0,      /* out contains a clamped source-space rect */
 	SS_MAP_NOT_VISIBLE, /* rect does not intersect the captured region */
-	SS_MAP_INVALID,     /* inputs unusable -> caller must fail closed */
+	SS_MAP_INVALID,     /* inputs unusable -> caller flags frame degraded */
 };
 
 /* Map a screen-space rect into source space, expand it by pad_px source
- * pixels on every side (over-mask, never under-mask), and clamp to the
- * source bounds. Any non-finite or degenerate geometry input yields
- * SS_MAP_INVALID; per the iron rules the caller must treat that as
- * fail-closed, not as "no rect". */
+ * pixels on every side (placement tolerance around a confident
+ * detection), and clamp to the source bounds. Any non-finite or
+ * degenerate geometry input yields SS_MAP_INVALID; per the amended
+ * rules (SPEC 2.7) the caller must surface that as a DEGRADED frame
+ * (status chip), never as a silently dropped rect. */
 enum ss_map_result ss_map_screen_rect(const struct ss_capture_geom *geom, const struct ss_rect *screen_rect,
 				      double pad_px, struct ss_rect *out);
 

@@ -49,9 +49,10 @@ bool ss_gen_toast_card(uint32_t w, uint32_t h, struct ss_image *out);
 /* Privacy plate: dark fill, lock glyph, "Hidden" label. */
 bool ss_gen_privacy_plate(uint32_t w, uint32_t h, struct ss_image *out);
 
-/* Fail-closed status banner: "Privacy guard: detection unavailable -
- * output blocked" on an opaque background, sized to the text. Drawn on
- * top of the full-black fail-closed fill. */
+/* Failure status chip: "StreamSentry: protection degraded - see log"
+ * on an opaque background, sized to the text. Drawn small in a corner
+ * of the normally-rendered output whenever protection cannot be fully
+ * verified (owner ruling 2026-07-09 — no blackout, never silent). */
 bool ss_gen_status_banner(struct ss_image *out);
 
 void ss_image_free(struct ss_image *img);

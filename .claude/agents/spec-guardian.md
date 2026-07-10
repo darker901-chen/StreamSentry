@@ -17,9 +17,14 @@ not care about elegance, cleverness, or effort spent — only compliance.
 2. Inspect the change set (use `git diff` / `git status` via Bash, read files as
    needed).
 3. Audit against, at minimum:
-   - Fail-closed integrity: every new failure path must land in blackout, never
-     fail-open; fail-closed must not be user-disableable.
-   - Masking opacity: no blur, no pixelation, no transparency on masks.
+   - Failure-notice integrity (amended by owner ruling 2026-07-09,
+     reports/RULING-2026-07-09-fail-open.md): no failure path may disrupt the
+     output, guess a mask position, OR pass silently — unverified protection
+     must render the source unmodified and surface the status chip + log; the
+     notice must not be user-disableable; allowlist mode fails toward its own
+     default (mask-all). Masks are drawn only at confident positions.
+   - Masking opacity: no blur, no pixelation, no transparency on masks that
+     are drawn; confident masks are never dropped (solid-fill fallback).
    - Scope lock: nothing from the out-of-scope list, no new features not in SPEC.md.
    - Dependency rule: no third-party dependencies beyond obs-plugintemplate.
    - Origin rule: no code imported or adapted from any other project.

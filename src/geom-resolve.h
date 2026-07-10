@@ -22,8 +22,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
  *
  * M2 scope: display/monitor capture only. Window/game/other capture
  * types cannot have their region resolved confidently here, so the
- * resolver reports failure and the filter fails closed (iron rule 1:
- * never guess a mask position). */
+ * resolver reports failure and the filter renders DEGRADED with the
+ * status chip while masks are pending (SPEC 2.7: never guess a mask
+ * position, never fail silently). */
 
 #pragma once
 
@@ -39,7 +40,7 @@ extern "C" {
  * fills *out only when the geometry is known with confidence (the
  * candidate monitor's pixel size matches the source's base size).
  * Returns false whenever anything is uncertain — the caller must then
- * fail closed if there are rects to mask. */
+ * flag the frame DEGRADED (chip) if there are rects to mask. */
 bool ss_resolve_capture_geom(obs_source_t *target, struct ss_capture_geom *out);
 
 #ifdef __cplusplus

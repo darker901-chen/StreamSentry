@@ -1,10 +1,14 @@
-# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 M6)
+# ARCHITECTURE.md — StreamSentry as built (v0.1 + v0.2 through M6.5)
 
 This documents the plugin **as actually built**, not aspirations —
-v0.1 as shipped at M4, plus the M6 hardening changes (marked "M6").
-When code and this file disagree, the code is the bug or this file is
-— fix one. The governing constraints live in CLAUDE.md (iron rules)
-and SPEC.md; this file explains how the implementation satisfies them.
+v0.1 as shipped at M4, the M6 hardening changes (marked "M6"), and the
+M6.5 fail-open repositioning (owner ruling 2026-07-09,
+reports/RULING-2026-07-09-fail-open.md: never disrupt the output; mask
+only on confidence; the full-frame blackout is removed). When code and
+this file disagree, the code is the bug or this file is — fix one. The
+governing constraints live in CLAUDE.md (iron rules, as amended
+2026-07-09) and SPEC.md (§2.7); this file explains how the
+implementation satisfies them.
 
 ## Module map
 
@@ -12,19 +16,21 @@ and SPEC.md; this file explains how the implementation satisfies them.
 |---|---|---|
 | [src/watcher.cpp](src/watcher.cpp) (+ watcher.h C interface) | C++, Win32 + COM/UIA + dwmapi + psapi. No libobs link dependency (obs_log/os_gettime_ns declared plainly, resolved by import-lib thunk in the plugin and by stubs in the selftest) | The one detection thread. Win32 window enumeration on a 150ms timer (toasts + blocklist), UIA focus-changed events (password fields). Publishes screen-space rects + heartbeat. |
 | [src/shared-state.c](src/shared-state.c) / .h | C, libobs `util/threading` (pthread mutex) | The only data channel between watcher and render: a fixed-size snapshot (`SS_MAX_RECTS = 64` rects + heartbeat) behind one mutex. Writer blocks briefly; reader is trylock-only. |
-| [src/coord-map.c](src/coord-map.c) / .h | Pure C, no OBS, no Windows | Screen-rect → source-rect mapping: intersect with captured region, scale, pad (over-mask), clamp. Unit-tested standalone. Any degenerate/non-finite input → `SS_MAP_INVALID`, which callers must treat as fail-closed. |
-| [src/geom-resolve.c](src/geom-resolve.c) / .h | C, Win32 + libobs | Resolves *what the filter's target source captures* (virtual-screen region + source pixel size). v0.1: `monitor_capture` only, and only when exactly one monitor's pixel size matches the source base size. Everything else → false → caller fails closed. |
-| [src/plate-gen.c](src/plate-gen.c) / .h | Pure C, no OBS, no Windows | CPU generator for mask visuals (RGBA8888): toast card, privacy plate, fail-closed status banner. Opacity (iron rule 3) is a *tested property*: `ss_image_opaque_inside()` + `ss_plate_max_corner_inset()` let unit tests prove every pixel inside the corner inset is alpha-255. |
-| [src/toast-gate.c](src/toast-gate.c) / .h (M6) | Pure C, no OBS, no Windows | Toast geometry gate (SPEC 2.2): right-edge spawn band + generous size envelope, evaluated per monitor. Applied *after* the process+class signature; only removes toast-card over-masking. Uncertainty (no monitors, degenerate input) classifies as toast — the gate can only fail toward masking. Constants are PROVISIONAL documented-metrics values (owner ruling 2026-07-09, reports/M6-toast-probe.txt) pending on-machine calibration. |
-| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings, per-frame health decision, coordinate mapping, plate texture cache, fail-closed rendering. |
+| [src/coord-map.c](src/coord-map.c) / .h | Pure C, no OBS, no Windows | Screen-rect → source-rect mapping: intersect with captured region, scale, pad, clamp. Unit-tested standalone. Any degenerate/non-finite input → `SS_MAP_INVALID`: that detection gets no mask and the frame is flagged DEGRADED (chip) — M6.5, SPEC 2.7. |
+| [src/geom-resolve.c](src/geom-resolve.c) / .h | C, Win32 + libobs | Resolves *what the filter's target source captures* (virtual-screen region + source pixel size). v0.1: `monitor_capture` only, and only when exactly one monitor's pixel size matches the source base size. Everything else → false → caller renders DEGRADED (chip) while masks are pending. |
+| [src/plate-gen.c](src/plate-gen.c) / .h | Pure C, no OBS, no Windows | CPU generator for mask visuals (RGBA8888): toast card, privacy plate, failure status chip. Opacity (iron rule 3) is a *tested property*: `ss_image_opaque_inside()` + `ss_plate_max_corner_inset()` let unit tests prove every pixel inside the corner inset is alpha-255. |
+| [src/toast-gate.c](src/toast-gate.c) / .h (M6) | Pure C, no OBS, no Windows | Toast geometry gate (SPEC 2.2): right-edge spawn band + generous size envelope, evaluated per monitor. Applied *after* the process+class signature; only removes toast-card over-masking. M6.5: uncertainty (no monitors, degenerate input) classifies as NOT a toast — mask only on confidence (SPEC 2.7). Constants are PROVISIONAL documented-metrics values (reports/M6-toast-probe.txt) pending on-machine calibration. |
+| [src/frame-decide.c](src/frame-decide.c) / .h (M6.5) | Pure C, no OBS, no Windows | The per-frame masking decision (SPEC 2.7 ordering): health → degraded-flag → geometry → per-rect mapping; guarantees a degradation flag never drops a confident mask (guardian V6 regression is a unit test). filter.c only resolves geometry, calls this, and draws. |
+| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings, per-frame health decision, coordinate mapping, plate texture cache, DEGRADED-chip rendering (M6.5). |
 | [src/plugin-main.c](src/plugin-main.c) | C, libobs | Module entry: `ss_state_init()` + `obs_register_source(&streamsentry_filter_info)`. |
 | src/plugin-support.c.in | template | obs-plugintemplate logging support (`obs_log`). |
 
-Dependency direction: `filter.c` → {coord-map, plate-gen, shared-state,
-geom-resolve, watcher-interface}. `watcher.cpp` → shared-state only.
-The two pure modules (coord-map, plate-gen) import nothing platform-
-specific — that is what makes the security properties unit-testable
-(ctest) without OBS or a display.
+Dependency direction: `filter.c` → {frame-decide, coord-map, plate-gen,
+shared-state, geom-resolve, watcher-interface}. `watcher.cpp` →
+{shared-state, toast-gate}. The four pure modules (coord-map,
+plate-gen, toast-gate, frame-decide) import nothing platform-specific —
+that is what makes the security properties unit-testable (ctest)
+without OBS or a display.
 
 ## Thread model
 
@@ -40,7 +46,7 @@ Three kinds of threads touch this code:
    then a `WaitForSingleObject(stop_event, 150ms)` loop; each tick runs
    `EnumWindows` and publishes one snapshot. If `CreateThread` fails the
    refcount is rolled back and nothing ever publishes → render side
-   fails closed by "no detection snapshot".
+   goes DEGRADED (chip) with "no detection snapshot".
 3. **UIA callback threads** — with an MTA client, UI Automation invokes
    `FocusHandler::HandleFocusChangedEvent` on COM worker threads, *not*
    on the watcher thread. The handler does minimal work (iron
@@ -86,17 +92,20 @@ watcher thread, every 150ms                     OBS graphics thread, every frame
 EnumDisplayMonitors -> monitor rects (M6)       filter_video_render:
 EnumWindows pass:                                 enabled? target has size? else skip
   visible? not DWM-cloaked? non-empty rect?       ss_state_try_read -> snapshot
-  toast:  proc==explorer.exe                      heartbeat age > 500ms? -> FAIL-CLOSED
+  toast:  proc==explorer.exe                      heartbeat age > 500ms? -> UNVERIFIED
           AND class==Xaml_WindowedPopupClass      rects present?
           AND geometry gate (M6; gate-fail          ss_resolve_capture_geom(target)
           falls through to block/allowlist)          (monitor_capture, unambiguous
-  block:  entry substring-matches process             monitor match only) else FAIL-CLOSED
+  block:  entry substring-matches process             monitor match only) else UNVERIFIED
           image name OR window title                 ss_map_screen_rect(+12px pad) each rect
   (proc names via PID cache, M6)                     OK -> keep; NOT_VISIBLE -> skip;
-UIA focus rect (if valid) appended                   INVALID -> FAIL-CLOSED
-snapshot.heartbeat = os_gettime_ns()              render target through filter chain
-ss_state_publish(snapshot)                        draw plate texture per mapped rect
-tick > 250ms -> LOG_WARNING (M6)                  (toast card / privacy plate)
+UIA focus rect (if valid) appended                   INVALID -> UNVERIFIED (keep OK rects)
+snapshot.detection_degraded (M6.5)                 (health/degraded/geometry/mapping order
+snapshot.heartbeat = os_gettime_ns()                is the pure frame-decide module, M6.5)
+ss_state_publish(snapshot)                        ALWAYS render target through filter chain
+tick > 250ms -> LOG_WARNING (M6)                  draw plate per confidently mapped rect
+                                                  UNVERIFIED -> small status chip on top
+                                                  (M6.5: blackout removed, SPEC 2.7)
 ```
 
 Rect kinds: `SS_RECT_TOAST` → notification card; `SS_RECT_WINDOW` and
@@ -113,45 +122,54 @@ every side (over-mask; must stay above `ss_plate_max_corner_inset()`)
 applied by OBS *downstream* of the filter, so a rect correct in source
 space stays glued under those transforms.
 
-## Fail-closed state machine (render side)
+## Failure semantics (render side) — M6.5, SPEC 2.7
 
-States: `INIT` → `NORMAL` ⇄ `FAIL_CLOSED` (per filter instance; used
-for transition logging, not behavior — behavior is recomputed every
-frame from scratch, so there is no state to get stuck in).
+States: `INIT` → `NORMAL` ⇄ `DEGRADED` (per filter instance; used for
+transition logging, not behavior — behavior is recomputed every frame
+from scratch, so there is no state to get stuck in).
 
-A frame renders **full black + status banner** ("Privacy guard:
-detection unavailable — output blocked") when any of these hold, in
-evaluation order:
+Owner ruling 2026-07-09: the output is **never disrupted**. The source
+renders through the filter chain on every frame. Confidently detected
+AND confidently mapped threats get opaque masks; anything the plugin
+cannot verify makes the frame **DEGRADED**: rendered normally with a
+small opaque **status chip** ("StreamSentry: protection degraded — see
+log") at the top-left (12px margin, ≤ 40% frame width, skipped below
+160×60), plus one LOG_WARNING per engagement. The v0.1 full-frame
+blackout no longer exists.
 
-| # | Trigger (log reason) | Source |
-|---|---|---|
-| 1 | `no detection snapshot` — never read a snapshot since filter create | filter.c |
-| 2 | `heartbeat stale` — snapshot heartbeat older than `SS_HEARTBEAT_STALE_NS` = 500ms (also fires if heartbeat is in the future) | filter.c |
-| 3 | `capture geometry unresolved` — rects pending but target is not monitor_capture, has zero size, or no/ambiguous monitor match (incl. two identical-resolution monitors) | geom-resolve.c |
-| 4 | `coordinate mapping failed` — any rect maps to `SS_MAP_INVALID` | coord-map.c |
-| 5 | `filter chain bypassed` — `obs_source_process_filter_begin` returned false | filter.c |
-| 6 | `plate texture allocation failed` — plate generation or `gs_texture_create` failed mid-draw (black is drawn *over* the already-rendered target) | filter.c |
+DEGRADED triggers, in evaluation order:
 
-Ordering that matters, as built: **all rects are mapped before the
-target is rendered** (triggers 3–4 are evaluated before
-`process_filter_begin`), so a mapping failure blacks the frame rather
-than leaving a partially-masked target on screen. Trigger 6 is the one
-mid-draw case; it paints black over whatever was already composed.
+| # | Trigger (log reason) | Source | Masks this frame |
+|---|---|---|---|
+| 1 | `no detection snapshot` — never read a snapshot since filter create | filter.c | none |
+| 2 | `heartbeat stale` — heartbeat older than `SS_HEARTBEAT_STALE_NS` = 500ms (also if in the future) | filter.c | none |
+| 3 | `detection degraded (monitor data unavailable)` — watcher published `detection_degraded` (monitor enumeration failed/truncated → toast gate cannot affirm; heartbeat still fresh; watcher logs the transition) | watcher.cpp → shared-state | block/allowlist + password masks still active |
+| 4 | `capture geometry unresolved` — rects pending but target is not monitor_capture, has zero size, or no/ambiguous monitor match (incl. two identical-resolution monitors) | geom-resolve.c | none |
+| 5 | `coordinate mapping failed for a detection` — some rect maps `SS_MAP_INVALID` | coord-map.c | **confidently mapped rects still masked** |
+| 6 | `filter chain bypassed with masks pending` — `process_filter_begin` failed while unverified or masks were due; source shown via `skip_video_filter`, chip on top | filter.c | none drawable |
 
-Deliberate non-triggers: `enabled == false` (explicit user off-switch —
-the whole feature is off, SPEC settings UI) and a zero-sized target
-both `obs_source_skip_video_filter()`. An *empty* rect list with a
-healthy heartbeat is pass-through — geometry is only resolved when
-there is something to mask, so an unsupported source type stays usable
-until the first detection, at which point it fails closed (documented
-v0.1 limitation).
+Not a DEGRADED trigger: plate-texture allocation failure for a
+confidently mapped rect draws a **solid opaque fallback fill** instead
+(a confident mask is never dropped — iron rule 3 as amended) with a
+log warning.
+
+Deliberate non-triggers: `enabled == false` and a zero-sized target
+both `obs_source_skip_video_filter()` with no chip (explicit user
+off-switch / nothing to protect). An *empty* rect list with a healthy
+heartbeat is clean pass-through, chip-free — geometry is resolved only
+when something needs masking, so e.g. a window-capture source shows a
+chip only while detections exist that cannot be placed.
 
 Watcher-side guarantees feeding this: the heartbeat is written only at
 the end of a fully successful enumerate-and-publish tick, and the
 fault-injection kill (`ss_watcher_debug_set_killed`, selftest-only)
-freezes publish *and* heartbeat exactly like a dead thread. Fail-closed
-engage/clear transitions are logged once each (no per-frame spam), with
+freezes publish *and* heartbeat exactly like a dead thread. DEGRADED
+engage/clear transitions are logged once each (no per-frame spam) with
 the heartbeat age in ms.
+
+Mode note for M7 (allowlist): per SPEC 2.7 the allowlist mode's failure
+state is its own default — a full-source mask-all plate + chip — since
+default-deny is what that user opted into. The chip mechanism is shared.
 
 ## Render-side caching (why per-frame cost is flat)
 
@@ -161,9 +179,9 @@ the heartbeat age in ms.
   sprite is stretched from bucket size to the exact mapped rect.
   Styles collapse to two (toast card / privacy plate) since FIELD and
   WINDOW share the plate.
-- **Status banner**: generated once per filter instance, cached until
-  destroy; centered and width-scaled at draw time (skipped below
-  160×60 target size — the black fill alone carries the guarantee).
+- **Status chip**: generated once per filter instance, cached until
+  destroy; drawn top-left, width-capped at 40% of the frame (skipped
+  below 160×60 target size — the OBS log still carries the warning).
 - CPU plate generation exists only on cache miss; steady state is a
   texture lookup + `gs_draw_sprite`.
 
@@ -178,7 +196,8 @@ Measured (M3, reports/M3-perf.md): watcher ≈ 0.55% of one core at
 |---|---|---|
 | `coord-map-tests` (ctest) | pure unit | mapping math: intersection, mixed-DPI scaling, padding, clamping, INVALID on degenerate input |
 | `plate-gen-tests` (ctest) | pure unit | **opacity as a property**: plates opaque inside corner inset; corner inset < mask pad; banner opaque |
-| `toast-gate-tests` (ctest, M6) | pure unit | geometry gate: documented toast shapes pass at 100–200% DPI (incl. slide-in and secondary-monitor cases); recorded flyover shapes rejected; **uncertainty classifies as toast** (no monitors / degenerate / NaN input) |
+| `toast-gate-tests` (ctest, M6) | pure unit | geometry gate: documented toast shapes pass at 100–200% DPI (incl. slide-in and secondary-monitor cases); recorded flyover shapes rejected; **uncertainty classifies as NOT a toast** (no monitors / degenerate / NaN input — M6.5, SPEC 2.7) |
+| `frame-decide-tests` (ctest, M6.5) | pure unit | SPEC 2.7 ordering: **degraded flag keeps confident masks** (guardian V6 regression), stale drops all masks, geometry/mapping failures flag the frame while confident rects stay masked, reason precedence |
 | `watcher-selftest` (manual exe, not registered with `add_test`) | integration | real EnumWindows/UIA against a live desktop: spawns notepad, fires a toast, exercises blocklist matching and the kill→stale-heartbeat path with obs stubs |
 
 The selftest links `watcher.cpp + shared-state.c` directly with its own
@@ -188,9 +207,11 @@ not include dllimport-decorated OBS headers.
 ## Known v0.1 architectural limits (documented, not bugs)
 
 - Only `monitor_capture` sources resolve geometry; window/game capture
-  fails closed on first detection. (geom-resolve.c)
+  cannot place masks — since M6.5 that renders normally with the
+  protection-degraded chip while detections exist (was: blackout).
+  (geom-resolve.c)
 - Two monitors with identical pixel size are indistinguishable →
-  ambiguous → fail closed. (geom-resolve.c)
+  ambiguous → same chip-degraded behavior. (geom-resolve.c)
 - Toast signature is per-Windows-build-family (verified on Win11 26200:
   explorer.exe + Xaml_WindowedPopupClass; over-matches other explorer
   XAML flyouts). SPEC.md's Win10-era ShellExperienceHost example is
@@ -213,3 +234,23 @@ not include dllimport-decorated OBS headers.
   cap (v0.1 never hit it in the field — 27 was the observed max).
 - Chromium password fields: a11y tree not always active → focus events
   may not fire (documented limitation; v0.2 investigation item).
+
+## Development workflow (multi-agent, gate-per-milestone)
+
+Every milestone in this repo is produced by a hub-and-spoke agent
+workflow (owner ruling 2026-07-09: document it here); the spokes talk
+to each other only through files in `reports/`:
+
+| Role | Writes | Job |
+|---|---|---|
+| main session (hub) | src/, tests/, docs | plans and implements the milestone; the only role that edits code |
+| **verifier** | `reports/M<n>-verifier.md` | clean from-scratch configure+build, runs every automated test, checks artifacts; never fixes anything; verdict VERIFIED/FAILED |
+| **spec-guardian** | `reports/M<n>-spec-guardian.md` | audits the staged diff line-by-line against CLAUDE.md + SPEC.md; no code write access; verdict PASS/FAIL blocks the milestone |
+| **scribe** | TESTING.md, CHANGELOG.md | records only what the two reports prove; refuses if either gate is missing or failed |
+
+A milestone lands only as VERIFIED + PASS + scribe record + owner's
+manual acceptance items (tracked in TESTING.md). Owner rulings that
+amend the rules are recorded as `reports/RULING-*.md` (or in commit
+messages, e.g. a434b18) and bind all later audits. The agents are
+defined in `.claude/agents/`; evidence is committed verbatim and never
+edited after the fact.

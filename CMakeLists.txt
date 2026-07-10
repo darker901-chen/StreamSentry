@@ -48,6 +48,8 @@ target_sources(
     src/shared-state.h
     src/geom-resolve.c
     src/geom-resolve.h
+    src/frame-decide.c
+    src/frame-decide.h
     src/toast-gate.c
     src/toast-gate.h
     src/watcher.cpp
@@ -78,9 +80,11 @@ if(STREAMSENTRY_BUILD_TESTS)
   add_executable(coord-map-tests tests/coord-map-tests.c src/coord-map.c)
   add_executable(plate-gen-tests tests/plate-gen-tests.c src/plate-gen.c)
   add_executable(toast-gate-tests tests/toast-gate-tests.c src/toast-gate.c)
+  add_executable(frame-decide-tests tests/frame-decide-tests.c src/frame-decide.c src/coord-map.c)
   add_test(NAME coord-map-tests COMMAND coord-map-tests)
   add_test(NAME plate-gen-tests COMMAND plate-gen-tests)
   add_test(NAME toast-gate-tests COMMAND toast-gate-tests)
+  add_test(NAME frame-decide-tests COMMAND frame-decide-tests)
 
   # Watcher self-test: exercises the real COM MTA watcher thread + Win32
   # enumeration + blocklist matching, stubbing the two libobs symbols the

@@ -25,24 +25,28 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include "filter.h"
 #include "coord-map.h"
+#include "frame-decide.h"
 #include "plate-gen.h"
 #include "shared-state.h"
 #include "geom-resolve.h"
 #include "watcher.h"
 
-/* Fail-closed threshold (SPEC.md): heartbeat older than 500ms means the
- * detection side cannot be trusted; the entire output goes black. This
- * constant is deliberately not exposed anywhere user-configurable. */
+/* Staleness threshold (SPEC.md): heartbeat older than 500ms means the
+ * detection side cannot be trusted. Per the 2026-07-09 owner ruling
+ * (SPEC 2.7) that no longer blacks the output — the source renders
+ * unmodified and a status chip tells the user protection is inactive.
+ * The threshold is deliberately not user-configurable. */
 #define SS_HEARTBEAT_STALE_NS 500000000ULL
 
-/* Over-mask padding in source pixels (SPEC.md: 8-16, must stay above
- * ss_plate_max_corner_inset()). */
+/* Padding in source pixels around CONFIDENT detections (SPEC.md: 8-16,
+ * must stay above ss_plate_max_corner_inset()). Placement tolerance,
+ * not guess-masking. */
 #define SS_MASK_PAD_PX 12.0
 
 enum ss_render_mode {
 	SS_MODE_INIT = 0,
 	SS_MODE_NORMAL,
-	SS_MODE_FAIL_CLOSED,
+	SS_MODE_DEGRADED, /* rendering normally, protection unverified */
 };
 
 #define SS_TEX_CACHE 8
@@ -141,8 +145,8 @@ static obs_properties_t *filter_get_properties(void *data)
 	obs_properties_add_bool(props, "enabled", obs_module_text("Enable"));
 
 	/* Blocklist: one process name or window-title substring per line
-	 * (SPEC settings UI). There is deliberately NO option to disable the
-	 * fail-closed behavior. */
+	 * (SPEC settings UI). There is deliberately NO option to disable
+	 * the protection-degraded status chip. */
 	obs_property_t *bl =
 		obs_properties_add_text(props, "blocklist", obs_module_text("Blocklist"), OBS_TEXT_MULTILINE);
 	obs_property_set_long_description(bl, obs_module_text("BlocklistHint"));
@@ -230,12 +234,12 @@ static gs_texture_t *get_plate_texture(struct ss_filter *f, enum ss_rect_kind ki
 	return tex;
 }
 
-static void draw_fail_closed(struct ss_filter *f, uint32_t w, uint32_t h)
+/* Small opaque status chip in the top-left corner of the normally
+ * rendered output (owner ruling 2026-07-09 / SPEC 2.7): the user must
+ * be told protection is inactive, without the output being disrupted.
+ * Deliberately not user-disableable. */
+static void draw_status_chip(struct ss_filter *f, uint32_t w, uint32_t h)
 {
-	struct vec4 black;
-	vec4_set(&black, 0.0f, 0.0f, 0.0f, 1.0f);
-	draw_solid(0.0f, 0.0f, (float)w, (float)h, &black);
-
 	if (!f->banner_tex) {
 		struct ss_image img;
 		if (ss_gen_status_banner(&img)) {
@@ -245,15 +249,17 @@ static void draw_fail_closed(struct ss_filter *f, uint32_t w, uint32_t h)
 			ss_image_free(&img);
 		}
 	}
-	if (f->banner_tex && w >= 160 && h >= 60) {
-		float bw = (float)f->banner_w, bh = (float)f->banner_h;
-		if (bw > (float)w - 16.0f) {
-			float scale = ((float)w - 16.0f) / bw;
-			bw *= scale;
-			bh *= scale;
-		}
-		draw_texture(f->banner_tex, ((float)w - bw) / 2.0f, ((float)h - bh) / 2.0f, bw, bh);
+	if (!f->banner_tex || w < 160 || h < 60)
+		return;
+
+	float bw = (float)f->banner_w, bh = (float)f->banner_h;
+	float max_w = (float)w * 0.4f;
+	if (bw > max_w) {
+		float scale = max_w / bw;
+		bw *= scale;
+		bh *= scale;
 	}
+	draw_texture(f->banner_tex, 12.0f, 12.0f, bw, bh);
 }
 
 static void log_mode(struct ss_filter *f, enum ss_render_mode mode, uint64_t age_ns, const char *reason)
@@ -262,11 +268,11 @@ static void log_mode(struct ss_filter *f, enum ss_render_mode mode, uint64_t age
 	if (mode == prev)
 		return;
 	f->last_mode = mode;
-	if (mode == SS_MODE_FAIL_CLOSED) {
-		obs_log(LOG_WARNING, "FAIL-CLOSED engaged: %s (heartbeat age %llu ms)", reason,
-			(unsigned long long)(age_ns / 1000000ULL));
-	} else if (prev == SS_MODE_FAIL_CLOSED) {
-		obs_log(LOG_INFO, "fail-closed cleared: normal rendering resumed");
+	if (mode == SS_MODE_DEGRADED) {
+		obs_log(LOG_WARNING, "PROTECTION DEGRADED: %s (heartbeat age %llu ms) - rendering with status chip",
+			reason, (unsigned long long)(age_ns / 1000000ULL));
+	} else if (prev == SS_MODE_DEGRADED) {
+		obs_log(LOG_INFO, "protection restored: full masking active again");
 	}
 	/* INIT -> NORMAL is silent: nothing was engaged, nothing cleared. */
 }
@@ -283,7 +289,8 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 
 	if (!f->enabled) {
 		/* Whole feature off by explicit user choice (SPEC settings
-		 * UI). Fail-closed cannot be disabled while enabled. */
+		 * UI) — not a failure state, so no chip. The chip cannot be
+		 * disabled while the filter is enabled. */
 		obs_source_skip_video_filter(f->source);
 		return;
 	}
@@ -298,38 +305,20 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 
 	uint64_t now = os_gettime_ns();
 	uint64_t age = (f->have_snap && now > f->snap.heartbeat_ns) ? now - f->snap.heartbeat_ns : UINT64_MAX;
-	bool unhealthy = !f->have_snap || age > SS_HEARTBEAT_STALE_NS;
-	const char *reason = !f->have_snap ? "no detection snapshot" : "heartbeat stale";
 
-	/* Map every rect BEFORE rendering the target: a mapping failure must
-	 * black the frame, not partially mask it. Geometry is resolved only
-	 * when there is something to mask. */
-	struct ss_rect mapped[SS_MAX_RECTS];
-	enum ss_rect_kind kinds[SS_MAX_RECTS];
-	size_t num_mapped = 0;
+	/* Geometry is resolved only when a fresh snapshot carries rects.
+	 * Everything else — which rects get masks, whether the chip shows,
+	 * and crucially that a degradation flag never drops a confident
+	 * mask (guardian M6.5 V6) — is decided by the pure, unit-tested
+	 * frame-decide module (SPEC 2.7 ordering). */
+	struct ss_capture_geom geom;
+	bool geom_valid = false;
+	if (f->have_snap && age <= SS_HEARTBEAT_STALE_NS && f->snap.num_rects > 0)
+		geom_valid = ss_resolve_capture_geom(target, &geom);
 
-	if (!unhealthy && f->snap.num_rects > 0) {
-		struct ss_capture_geom geom;
-		if (!ss_resolve_capture_geom(target, &geom)) {
-			unhealthy = true;
-			reason = "capture geometry unresolved (unsupported source or scaled capture)";
-		} else {
-			for (size_t i = 0; i < f->snap.num_rects && !unhealthy; i++) {
-				struct ss_rect out;
-				enum ss_map_result r = ss_map_screen_rect(&geom, &f->snap.rects[i].screen,
-									  SS_MASK_PAD_PX, &out);
-				if (r == SS_MAP_OK) {
-					mapped[num_mapped] = out;
-					kinds[num_mapped] = f->snap.rects[i].kind;
-					num_mapped++;
-				} else if (r == SS_MAP_INVALID) {
-					unhealthy = true;
-					reason = "coordinate mapping failed";
-				}
-				/* NOT_VISIBLE: rect outside this capture, skip */
-			}
-		}
-	}
+	struct ss_frame_decision dec;
+	ss_decide_frame(&f->snap, f->have_snap, age, SS_HEARTBEAT_STALE_NS, geom_valid, &geom, SS_MASK_PAD_PX,
+			&dec);
 
 #ifdef STREAMSENTRY_PERF_LOG
 	/* Per-frame CPU decision cost (state read + heartbeat + geometry +
@@ -347,35 +336,48 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 	}
 #endif
 
-	if (unhealthy) {
-		draw_fail_closed(f, w, h);
-		log_mode(f, SS_MODE_FAIL_CLOSED, age == UINT64_MAX ? 0 : age, reason);
-		return;
-	}
-
+	/* The source renders in EVERY case (owner ruling 2026-07-09: never
+	 * disrupt the output). If the filter chain cannot be entered, fall
+	 * back to skipping the filter — the source still shows — and put
+	 * the chip on top when masks were needed but undrawable. */
 	if (!obs_source_process_filter_begin(f->source, GS_RGBA, OBS_ALLOW_DIRECT_RENDERING)) {
-		draw_fail_closed(f, w, h);
-		log_mode(f, SS_MODE_FAIL_CLOSED, age, "filter chain bypassed");
+		obs_source_skip_video_filter(f->source);
+		if (dec.unverified || dec.num_mapped > 0) {
+			draw_status_chip(f, w, h);
+			log_mode(f, SS_MODE_DEGRADED, age == UINT64_MAX ? 0 : age,
+				 "filter chain bypassed with masks pending");
+		}
 		return;
 	}
 	obs_source_process_filter_end(f->source, obs_get_base_effect(OBS_EFFECT_DEFAULT), w, h);
 
-	for (size_t i = 0; i < num_mapped; i++) {
-		uint32_t bw = bucket_dim(mapped[i].w);
-		uint32_t bh = bucket_dim(mapped[i].h);
-		gs_texture_t *tex = get_plate_texture(f, kinds[i], bw, bh);
-		if (!tex) {
-			draw_fail_closed(f, w, h);
-			log_mode(f, SS_MODE_FAIL_CLOSED, age, "plate texture allocation failed");
-			return;
+	for (size_t i = 0; i < dec.num_mapped; i++) {
+		uint32_t bw = bucket_dim(dec.mapped[i].w);
+		uint32_t bh = bucket_dim(dec.mapped[i].h);
+		gs_texture_t *tex = get_plate_texture(f, dec.kinds[i], bw, bh);
+		if (tex) {
+			draw_texture(tex, (float)dec.mapped[i].x, (float)dec.mapped[i].y, (float)dec.mapped[i].w,
+				     (float)dec.mapped[i].h);
+		} else {
+			/* A confidently mapped threat is never left unmasked:
+			 * solid opaque fallback (iron rule 3 as amended). */
+			struct vec4 dark;
+			vec4_set(&dark, 0.08f, 0.09f, 0.11f, 1.0f);
+			draw_solid((float)dec.mapped[i].x, (float)dec.mapped[i].y, (float)dec.mapped[i].w,
+				   (float)dec.mapped[i].h, &dark);
+			obs_log(LOG_WARNING, "plate texture allocation failed; solid fallback drawn");
 		}
-		draw_texture(tex, (float)mapped[i].x, (float)mapped[i].y, (float)mapped[i].w, (float)mapped[i].h);
 	}
 
-	log_mode(f, SS_MODE_NORMAL, age, "");
-	if (num_mapped != f->last_plate_count) {
-		obs_log(LOG_INFO, "mask plates active: %zu", num_mapped);
-		f->last_plate_count = num_mapped;
+	if (dec.unverified) {
+		draw_status_chip(f, w, h);
+		log_mode(f, SS_MODE_DEGRADED, age == UINT64_MAX ? 0 : age, dec.reason);
+	} else {
+		log_mode(f, SS_MODE_NORMAL, age, "");
+	}
+	if (dec.num_mapped != f->last_plate_count) {
+		obs_log(LOG_INFO, "mask plates active: %zu", dec.num_mapped);
+		f->last_plate_count = dec.num_mapped;
 	}
 }
 

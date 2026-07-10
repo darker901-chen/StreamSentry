@@ -47,15 +47,20 @@ with this program. If not, see <https://www.gnu.org/licenses/>
  *   caps   width <= 60% / height <= 90% of the monitor kill full-width
  *          and full-screen shell surfaces at any DPI
  *
- * Over-mask-safety argument (SPEC 2.2 requires it here): this gate only
- * ever REMOVES masking from signature-matched windows, so a too-narrow
- * rule would expose real toasts (unacceptable), while a too-wide rule
- * merely re-admits some flyover plates (cosmetic). Hence: bounds sit
- * far outside every documented variant; the band spans the FULL right
- * edge (top-right and bottom-right anchor variants both covered); the
- * height band is content-agnostic; and any degenerate input classifies
- * as toast. The v0.1 acceptance row "real toast masked before readable"
- * remains binding at acceptance time.
+ * Safety argument (SPEC 2.2 + the 2026-07-09 fail-open ruling, SPEC
+ * 2.7): a toast card is drawn only when geometry AFFIRMATIVELY looks
+ * like a banner — mask only on confidence. Bounds sit far outside
+ * every documented variant so DPI/content variants still affirm; the
+ * band spans the FULL right edge (top-right and bottom-right anchor
+ * variants both covered); the height band is content-agnostic. Inputs
+ * we cannot reason about (missing/degenerate monitor data, non-finite
+ * rects) classify as NOT a toast: under the ruling, a wrong mask
+ * disrupts the user and is worse than a missed one. The accepted
+ * residual — a real toast unmasked while monitor enumeration is broken
+ * — is never silent: the watcher logs the transition AND publishes
+ * detection_degraded in the snapshot, so the render side shows the
+ * protection-degraded chip. The v0.1 acceptance row "real toast masked
+ * before readable" remains binding for the healthy path.
  */
 #define SS_TOAST_EDGE_BAND_PX 160.0
 #define SS_TOAST_W_MIN 200.0
@@ -72,17 +77,13 @@ static bool rect_sane(const struct ss_rect *r)
 
 bool ss_toast_geom_plausible(const struct ss_rect *mon, const struct ss_rect *win)
 {
-	/* Uncertainty -> mask (iron rule 1 direction). */
+	/* Uncertainty -> NOT a toast (SPEC 2.7: mask only on confidence). */
 	if (!mon || !win || !rect_sane(mon) || !rect_sane(win))
-		return true;
+		return false;
 	if (mon->w <= 0.0 || mon->h <= 0.0)
-		return true;
-
-	/* A window the enum pass reported with degenerate size would have
-	 * been dropped there; treat it as implausible only when we can
-	 * actually reason about it. */
+		return false;
 	if (win->w <= 0.0 || win->h <= 0.0)
-		return true;
+		return false;
 
 	/* Size envelope (absolute + relative to this monitor). */
 	if (win->w < SS_TOAST_W_MIN || win->w > SS_TOAST_W_MAX)
@@ -117,9 +118,9 @@ bool ss_toast_geom_plausible(const struct ss_rect *mon, const struct ss_rect *wi
 
 bool ss_toast_geom_plausible_any(const struct ss_rect *mons, size_t num_mons, const struct ss_rect *win)
 {
-	/* No monitor data -> cannot evaluate -> mask. */
+	/* No monitor data -> cannot affirm -> not a toast (SPEC 2.7). */
 	if (!mons || num_mons == 0)
-		return true;
+		return false;
 	for (size_t i = 0; i < num_mons; i++) {
 		if (ss_toast_geom_plausible(&mons[i], win))
 			return true;

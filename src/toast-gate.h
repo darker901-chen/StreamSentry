@@ -22,10 +22,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
  * Applied by the watcher AFTER the process+class toast signature: a
  * signature-matched window is reported as a toast only if its geometry
  * is plausible for a toast banner; otherwise it falls through to
- * ordinary block/allowlist matching. The gate therefore only ever
- * REMOVES toast-card over-masking — and per iron rule 1 it must fail
- * toward masking: any uncertainty in the inputs classifies the window
- * as a toast.
+ * ordinary block/allowlist matching. Per the 2026-07-09 owner ruling
+ * (SPEC 2.7, mask only on confidence) the gate fails toward NOT
+ * masking: inputs it cannot reason about classify as not-a-toast.
  */
 
 #pragma once
@@ -41,11 +40,11 @@ extern "C" {
 
 /* True when `win` (virtual-screen physical pixels) is geometrically
  * plausible as a toast banner on monitor `mon`. Degenerate/non-finite
- * inputs -> true (mask). */
+ * inputs -> false (cannot affirm -> no toast card). */
 bool ss_toast_geom_plausible(const struct ss_rect *mon, const struct ss_rect *win);
 
 /* Gate against a monitor list: plausible on ANY monitor -> true.
- * Empty/NULL monitor list -> true (cannot evaluate -> mask). */
+ * Empty/NULL monitor list -> false (cannot affirm -> no toast card). */
 bool ss_toast_geom_plausible_any(const struct ss_rect *mons, size_t num_mons, const struct ss_rect *win);
 
 #ifdef __cplusplus

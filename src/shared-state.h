@@ -53,6 +53,12 @@ struct ss_shared_rect {
 
 struct ss_snapshot {
 	uint64_t heartbeat_ns; /* os_gettime_ns() at last watcher tick */
+	/* True when detection is running but degraded in a way that does
+	 * not stall the heartbeat (e.g. monitor enumeration failed, so the
+	 * toast geometry gate cannot affirm anything). The render side
+	 * must surface the status chip (SPEC 2.7: failures are never
+	 * silent). */
+	bool detection_degraded;
 	size_t num_rects;
 	struct ss_shared_rect rects[SS_MAX_RECTS];
 };

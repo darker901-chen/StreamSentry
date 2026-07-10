@@ -22,7 +22,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
  * right-edge anchored) at several DPI scales; negative fixtures = the
  * flyover/popup shapes recorded on the dev machine 2026-07-09
  * (reports/M6-toast-probe.txt) transplanted onto the toast signature.
- * The gate must fail toward masking on any degenerate input. */
+ * Per the 2026-07-09 fail-open ruling (SPEC 2.7) the gate fails toward
+ * NOT masking: degenerate/unknowable input classifies as not-a-toast. */
 
 #include <math.h>
 #include <stdio.h>
@@ -108,22 +109,22 @@ int main(void)
 		CHECK(!ss_toast_geom_plausible_any(mons, 2, &centered1));
 	}
 
-	/* ---- uncertainty fails toward masking ---- */
-	CHECK(ss_toast_geom_plausible_any(NULL, 0, &mon));               /* no monitors */
+	/* ---- uncertainty fails toward NOT masking (SPEC 2.7) ---- */
+	CHECK(!ss_toast_geom_plausible_any(NULL, 0, &mon));              /* no monitors */
 	{
 		struct ss_rect mons[1] = {R(0, 0, 2560, 1440)};
-		CHECK(ss_toast_geom_plausible_any(mons, 0, &mons[0]));   /* zero count */
+		CHECK(!ss_toast_geom_plausible_any(mons, 0, &mons[0]));  /* zero count */
 	}
-	CHECK(ss_toast_geom_plausible(NULL, &mon));                      /* null monitor */
+	CHECK(!ss_toast_geom_plausible(NULL, &mon));                     /* null monitor */
 	{
 		struct ss_rect degenerate_mon = R(0, 0, 0, 0);
 		struct ss_rect w = R(2200, 400, 396, 180);
-		CHECK(ss_toast_geom_plausible(&degenerate_mon, &w));
+		CHECK(!ss_toast_geom_plausible(&degenerate_mon, &w));
 	}
 	{
 		struct ss_rect nan_mon = R(nan(""), 0, 2560, 1440);
-		struct ss_rect w = R(1080, 400, 396, 180); /* would be rejected on a sane monitor */
-		CHECK(ss_toast_geom_plausible(&nan_mon, &w));
+		struct ss_rect w = R(2148, 400, 396, 180); /* would PASS on a sane 2560-wide monitor */
+		CHECK(!ss_toast_geom_plausible(&nan_mon, &w));
 	}
 
 	if (failures) {
