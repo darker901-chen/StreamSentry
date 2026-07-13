@@ -212,6 +212,33 @@ per-milestone verification evidence — see its own README),
 `.claude/` (workflow agent definitions), `scripts/` (dev environment
 bootstrap).
 
+## AI authorship disclosure
+
+In the interest of transparency: **StreamSentry is a predominantly
+AI-authored project.** An AI coding assistant (Anthropic's Claude, via
+Claude Code) authored the architecture, the C/C++ source, the unit
+tests, the CMake build configuration, and the documentation — working
+through an AI-run multi-agent gate workflow, where an independent build
+**verifier** and a spec/rules **auditor** reviewed every milestone.
+
+The human maintainer *directed* the project rather than writing its
+code: setting the requirements and constraints, making every design and
+policy decision (for example the 2026-07-09 "assist, not insurance"
+repositioning and the blocklist match semantics), and performing
+acceptance and real-device verification.
+
+This is stated plainly because it is the truth and because distribution
+venues increasingly — and reasonably — ask for it. Concretely: platforms
+whose rules prohibit "entirely or mostly AI-made" resources (the **OBS
+Forum resource policy**, updated 2026-07-12, is one) would consider
+StreamSentry ineligible on that basis. It is therefore distributed only
+from its own repository / release page, **not** submitted to the OBS
+Forum. Personal use and self-distribution are unaffected.
+
+"Original code" below means original to this project — written against
+the OBS Studio and Windows SDK documentation, not copied or adapted from
+any other codebase — not that it was human-written.
+
 ## License
 
 GPL-2.0-or-later — see [LICENSE](LICENSE). All original code, written
