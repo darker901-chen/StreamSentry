@@ -9,6 +9,44 @@ Two unreleased sets live here, newest first: the v0.2 development cycle
 (M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
 Nothing has been pushed or tagged; publishing is a human step.
 
+### Release preparation audit - 2026-07-14
+
+The current **0.2.0 beta** release-preparation state passed the matching
+`reports/verify-004.md` (**VERIFIED**) and `reports/spec-review-004.md`
+(**PASS**) gates. A clean Windows x64 Release build passed with compiler
+warnings treated as errors; all four automated suites and the watcher
+self-test passed; and the clean archive contains exactly the release DLL and
+English locale, with no PDB. README install/uninstall guidance, package layout,
+supported Windows version, checksum/log/unsigned-beta wording, packaged locale,
+and the real **Add to list** / **Refresh list** UI labels were checked against
+the artifact and source.
+
+#### Changed
+
+- Allowlist documentation now follows the final deterministic non-content
+  ruling: <=16 px top-level slivers and `Progman` / `WorkerW` desktop wallpaper
+  hosts are excluded, while the taskbar and unapproved application windows are
+  still masked. An empty allowlist approves no content-bearing window.
+- The recommended manual install uses the OBS plugin folder under
+  `%ProgramData%`; troubleshooting, uninstall, unsigned-build, release-note
+  checksum, and support/log guidance were clarified for external users.
+- Release packaging excludes PDB files. macOS and Linux template build jobs are
+  dormant because StreamSentry is Windows-only, and project/repository metadata
+  now points to the StreamSentry repository.
+- Public copy distinguishes deterministic, offline runtime detection from the
+  disclosed AI-assisted development process and labels this build beta; it does
+  not claim an OBS Forum submission.
+
+#### Pending owner acceptance
+
+- Real-toast timing; real in-OBS blocklist/allowlist/picker, wallpaper/sliver,
+  panic, and degraded-direction behavior; mixed-DPI/multi-monitor placement;
+  the 30-minute busy SRT soak with watcher p99; two-hour idle memory; and 60 fps
+  impact remain manual.
+- Fresh-machine install/uninstall/security-warning handling and rendered
+  README/UI checks also remain open. This audit is not final release acceptance
+  and does not authorize pushing, tagging, publishing, or an OBS Forum listing.
+
 ### 0.2.0-m8 - 2026-07-10
 
 Milestone M8 closes the v0.2 cycle: the **window-picker UI** (SPEC Part 2

@@ -6,9 +6,9 @@ accidents *before* they reach your capture — and clearly tells you
 (with an on-output status chip) whenever it cannot verify it is
 protecting you. It never interrupts your stream.
 
-> Status: **v0.2, pre-release.** Machine-verified (4 unit-test suites +
-> live watcher self-test, every milestone gated by an independent build
-> verifier and a spec audit); several real-device checks remain a manual
+> Status: **v0.2.0 beta.** Machine-verified (4 unit-test suites +
+> live watcher self-test, every milestone gated by a separate build-verifier
+> agent and spec-auditor agent); several real-device checks remain a manual
 > pass (see [Limitations](#limitations) and the checklist in
 > `TESTING.md`).
 
@@ -30,11 +30,11 @@ says so with a small on-output status chip instead of guessing.
 
 ## How it works, and why
 
-**Deterministic, never AI.** Detection is Win32 window enumeration plus
+**Deterministic runtime detection — no AI.** Detection is Win32 window enumeration plus
 UI Automation — window class/process signatures and the UIA password
-property. There is no machine learning anywhere in this plugin. A privacy
-guarantee you can't audit isn't a guarantee; every masking decision here
-is traceable to an explicit OS-level rule.
+property. The installed plugin performs no machine-learning inference and
+sends no captured content to a service; every masking decision is traceable
+to an explicit OS-level rule. Development authorship is disclosed below.
 
 **Masks only when confident — and says so when it isn't.** A single
 watcher thread owns detection and updates a heartbeat every tick. Masks
@@ -57,26 +57,48 @@ tools. Opaque is the only honest guarantee.
 
 ## Requirements
 
-- Windows 10 21H2+ or Windows 11, x64
-- OBS Studio 30 or newer
+- Windows 10 21H2 or later, or Windows 11, x64
+- OBS Studio 32.1.2 (verified). Older OBS releases may work but are not part
+  of the current compatibility evidence.
 
 ## Install
 
-1. Download `streamsentry-0.2.0-windows-x64.zip` from the Releases page.
+1. Download `streamsentry-0.2.0-windows-x64.zip` from the
+   [Releases page](https://github.com/darker901-chen/StreamSentry/releases).
+   If possible, compare its SHA-256 value with the checksum printed in that
+   release's notes.
    It contains one folder, `streamsentry\`, laid out as a self-contained
    OBS plugin (`bin\64bit\streamsentry.dll` + `data\locale\...`).
-2. Install it either way:
-   - **Plugin folder (recommended, OBS 28+):** extract the `streamsentry`
-     folder into `%ProgramData%\obs-studio\plugins\` (create `plugins` if
-     it does not exist).
-   - **Into the OBS install directory:** copy
-     `streamsentry\bin\64bit\*` into `obs-studio\obs-plugins\64bit\` and
-     `streamsentry\data\*` into `obs-studio\data\obs-plugins\streamsentry\`.
-3. Restart OBS. Confirm `obs-studio\...\logs` shows
-   `[streamsentry] plugin loaded successfully`.
+2. Close OBS. Extract the `streamsentry` folder into
+   `%ProgramData%\obs-studio\plugins\` so the final DLL path is exactly
+   `%ProgramData%\obs-studio\plugins\streamsentry\bin\64bit\streamsentry.dll`.
+   Windows may request administrator approval. Avoid an accidental nested
+   `streamsentry\streamsentry\...` folder.
+3. Start OBS. Add or select a **Display Capture**, open **Filters**, and
+   confirm **StreamSentry** appears under **Effect Filters**.
+4. For log confirmation, use **Help → Log Files → View Current Log** or open
+   `%APPDATA%\obs-studio\logs`; look for
+   `[streamsentry] plugin loaded successfully (version 0.2.0)`.
 
-A self-built DLL may trigger a Windows SmartScreen warning; that is normal
-for locally-built, unsigned binaries.
+The beta DLL is unsigned. Windows or security software may warn about the
+download; verify the published checksum and do not bypass a warning if the
+hash does not match.
+
+### Uninstall
+
+Close OBS, delete `%ProgramData%\obs-studio\plugins\streamsentry\`, then
+start OBS again. Existing scenes may retain an unavailable-filter entry until
+you remove that filter from the source.
+
+### Install troubleshooting
+
+- If StreamSentry is missing, confirm the exact DLL path from step 2 and check
+  the current OBS log for `streamsentry` or a module-load error.
+- The beta is Windows x64 only; Windows on Arm and 32-bit builds are unsupported.
+- `Failed to load 'zh-TW' text` followed by the successful-load line means OBS
+  fell back to the bundled English locale; it is not a plugin-load failure.
+- Installing directly into the OBS application directory is a legacy layout
+  that OBS says will stop working in a future version, so it is not recommended.
 
 ## Usage
 
@@ -88,9 +110,10 @@ for locally-built, unsigned binaries.
    - **Enable** — turns the whole filter on/off.
    - **Masking mode** (v0.2):
      - **Blocklist** (default) — mask only the windows you list.
-     - **Allowlist** — mask **everything except** the windows you list.
-       Default-deny: an empty allowlist masks the whole screen
-       (including the taskbar and wallpaper) until you approve things.
+     - **Allowlist** — mask every detectable content-bearing window except
+       the windows you list. Default-deny: an empty allowlist masks application
+       windows and the taskbar until you approve them. Known non-content
+       desktop wallpaper hosts remain visible.
        This is the structural answer to "the thing I never thought to
        blocklist" — nothing shows unless you said so.
    - **Blocklist / Allowlist** — one process name or window-title
@@ -100,10 +123,10 @@ for locally-built, unsigned binaries.
      starts empty on purpose. The two lists are stored separately —
      switching modes never reinterprets one as the other.
    - **Window picker** (v0.2) — the *Open windows* dropdown lists what
-     is currently on screen as "process — title". Pick one, press *Add
-     selected window to the active list*, and it lands in whichever
-     list your current mode uses. No more guessing process names.
-     *Refresh window list* re-scans. Duplicates are not added twice.
+     is currently on screen as "process - title". Pick one, press
+     **Add to list**, and it lands in whichever list your current mode
+     uses. No more guessing process names. **Refresh list** re-scans.
+     Duplicates are not added twice.
    - There is deliberately **no** option to disable the "protection
      degraded" status chip.
 4. **Panic hotkey** (v0.2): bind "StreamSentry: mask everything
@@ -205,8 +228,9 @@ and what is deliberately out of scope), and [TESTING.md](TESTING.md)
 (what has been verified, and how).
 
 **Everything else is internal project process** — you can safely ignore
-it: [CLAUDE.md](CLAUDE.md) (iron rules for the AI-assisted workflow that
-builds this plugin), [SETUP.md](SETUP.md) (dev-box bootstrap notes,
+it: [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md) (iron rules for the
+   Claude Code and Codex workflows that
+build this plugin), [SETUP.md](SETUP.md) (dev-box bootstrap notes,
 Traditional Chinese, machine-specific), [reports/](reports/) (frozen
 per-milestone verification evidence — see its own README),
 `.claude/` (workflow agent definitions), `scripts/` (dev environment
@@ -214,12 +238,10 @@ bootstrap).
 
 ## AI authorship disclosure
 
-In the interest of transparency: **StreamSentry is a predominantly
-AI-authored project.** An AI coding assistant (Anthropic's Claude, via
-Claude Code) authored the architecture, the C/C++ source, the unit
-tests, the CMake build configuration, and the documentation — working
-through an AI-run multi-agent gate workflow, where an independent build
-**verifier** and a spec/rules **auditor** reviewed every milestone.
+**StreamSentry is a predominantly AI-authored project.** Anthropic's Claude,
+via Claude Code, authored the architecture, C/C++ source, tests, build files,
+and documentation through a multi-agent workflow with separate verifier and
+spec-auditor roles.
 
 The human maintainer *directed* the project rather than writing its
 code: setting the requirements and constraints, making every design and
@@ -227,17 +249,20 @@ policy decision (for example the 2026-07-09 "assist, not insurance"
 repositioning and the blocklist match semantics), and performing
 acceptance and real-device verification.
 
-This is stated plainly because it is the truth and because distribution
-venues increasingly — and reasonably — ask for it. Concretely: platforms
-whose rules prohibit "entirely or mostly AI-made" resources (the **OBS
-Forum resource policy**, updated 2026-07-12, is one) would consider
-StreamSentry ineligible on that basis. It is therefore distributed only
-from its own repository / release page, **not** submitted to the OBS
-Forum. Personal use and self-distribution are unaffected.
+This project is distributed from its own repository and is not submitted to
+the OBS Forum resource directory, whose current policy excludes resources
+written entirely or largely with AI coding tools.
 
 "Original code" below means original to this project — written against
 the OBS Studio and Windows SDK documentation, not copied or adapted from
 any other codebase — not that it was human-written.
+
+## Support and issue reports
+
+Use [GitHub Issues](https://github.com/darker901-chen/StreamSentry/issues) for
+bugs and compatibility reports. Include the OBS version, Windows version,
+capture-source type, reproduction steps, and the relevant StreamSentry log
+lines. Do not attach logs containing private stream keys or account data.
 
 ## License
 

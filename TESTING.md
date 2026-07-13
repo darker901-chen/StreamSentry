@@ -1225,3 +1225,111 @@ the close-out index).
      system-suppressed on this machine; the M6 diagnostic note (split
      "banner never displayed" from "detection missed it") applies
      unchanged.
+
+## Release preparation — 2026-07-14 — v0.2.0 beta documentation/package audit
+
+### Gate status
+
+Sources: `reports/verify-004.md` (**VERIFIED**) and
+`reports/spec-review-004.md` (**PASS**). These reports cover the exact
+release-preparation fingerprint starting at HEAD
+`0be2ec9bfe2956e32fbb38f74c79ae390eed269d`, including the retained failed
+audit rounds and the final corrections that supersede them. This scribe entry
+records the successful pair; it does not turn the owner-manual acceptance
+matrix into a pass.
+
+The final owner ruling
+`reports/RULING-2026-07-13-noncontent-window-exclusions.md` is included in the
+audited state. It fixes two deterministic non-content exclusions in both
+matching modes: top-level windows whose width or height is at most 16 physical
+pixels, and `Progman` / `WorkerW` wallpaper hosts. The taskbar and application
+windows are not exempt. An empty allowlist therefore approves no
+content-bearing window, while the desktop wallpaper remains visible; panic and
+unverified allowlist paths still use the full-source mask-all plate.
+
+### Automated release-preparation evidence
+
+Environment: Windows 11 10.0.26200, CMake 3.28.0-rc5, Visual Studio 2022 / MSVC
+19.44.35224.0, Windows SDK 10.0.26100.0, OBS dependency sources 31.1.1, Windows
+x64 `Release`, and `CMAKE_COMPILE_WARNING_AS_ERROR=ON`.
+
+The verifier deleted the ignored `build_x64` and `release` trees before the
+run, then used these commands:
+
+```powershell
+cmake --preset windows-x64-local -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+cmake --build build_x64 --config Release --parallel -- /consoleLoggerParameters:Summary /noLogo
+ctest --test-dir build_x64 -C Release --output-on-failure
+build_x64\Release\coord-map-tests.exe
+build_x64\Release\plate-gen-tests.exe
+build_x64\Release\toast-gate-tests.exe
+build_x64\Release\frame-decide-tests.exe
+build_x64\Release\watcher-selftest.exe
+cmake --install build_x64 --prefix F:\StreamSentry\release\Release --config Release
+Compress-Archive -Path (Get-ChildItem release\Release).FullName `
+  -DestinationPath release\streamsentry-0.2.0-windows-x64.zip `
+  -CompressionLevel Optimal -Force
+```
+
+Results:
+
+- Clean configure and build passed with zero compiler warnings and zero
+  compiler errors under warnings-as-errors. The only two configure warnings
+  came from the OBS dependency sources: the Detours version lookup and the
+  empty virtual-camera GUID.
+- CTest passed 4/4. The coordinate-map, plate-generator, toast-gate, and
+  frame-decision executables each passed directly.
+- `watcher-selftest.exe` passed start/heartbeat, Notepad blocklist appearance
+  and disappearance, named/deduplicated picker enumeration, allowlist masking,
+  blocklist restoration, debug-kill degradation, recovery, and clean shutdown;
+  it left no Notepad process. Its toast leg was **INCONCLUSIVE** because the OS
+  displayed no banner, so real-toast timing remains manual.
+- The clean install and zip each contain one `streamsentry` root and exactly
+  `streamsentry/bin/64bit/streamsentry.dll` (77,312 bytes) plus
+  `streamsentry/data/locale/en-US.ini` (1,429 bytes). Installed and archived
+  PDB counts are both zero. The installed DLL is byte-identical to the built
+  DLL, reports version 0.2.0, and is unsigned as documented. The final zip
+  SHA-256 for this run is
+  `6f182c86ccea862d85463bc0ba70aad97ebc8521a9966478561b3d9b7824eb52`.
+- README installation, uninstall, supported-platform, ProgramData layout,
+  checksum-in-release-notes, log, unsigned-beta, and repository claims agree
+  with the package/workflow. The packaged locale agrees with the ruled
+  content-bearing allowlist semantics. README names the actual **Add to list**
+  and **Refresh list** controls, and `src/filter.c` wires those locale keys to
+  the OBS property buttons. Markdown/grammar and JSON/YAML hygiene checks pass.
+- The matching spec review found the fail-open blocklist direction, allowlist
+  mask-all exception, rect overflow, coordinate confidence, opaque fallback,
+  deterministic-only runtime, thread boundaries, dependency/scope lock,
+  GPL-2.0-or-later provenance, package claims, and AI/distribution wording
+  conformant for this fingerprint.
+
+### Owner-manual acceptance — STATUS: PENDING
+
+The project remains a **beta**. Before final acceptance, pushing/tagging, or any
+external listing, the owner still needs to record all of the following:
+
+1. A real Windows toast is detected with the current signature/geometry and is
+   plated before its content is readable, including the toast exception in
+   allowlist mode.
+2. Real in-OBS blocklist, allowlist, mode round-trip, picker, and capture
+   behavior. This includes confirming that <=16 px slivers and
+   `Progman` / `WorkerW` wallpaper hosts stay visible, while the taskbar and
+   unapproved application windows remain masked in allowlist mode.
+3. Panic engages on the next rendered frame in both modes; panic remains a
+   full-source privacy plate during watcher failure, with the degraded chip on
+   top, and releases cleanly.
+4. Degraded directions match the ruling: blocklist mode keeps the source
+   visible and adds the status chip/log; allowlist mode uses its mask-all plate
+   plus the status chip; neither path produces raw black or a guessed mask.
+5. Supported full-monitor Display Capture mapping is correct across multiple
+   monitors and mixed DPI, including source transforms covered by the manual
+   matrix.
+6. A 30-minute busy-desktop SRT streaming soak records zero stale-heartbeat
+   degraded events and the watcher tick p99 (target below 50 ms).
+7. A two-hour idle run shows stable memory/working set, and a 60 fps recording
+   measures render impact/frame drops.
+8. A fresh Windows x64 machine completes download/checksum, extraction,
+   install, security-warning handling, OBS load/filter selection, uninstall,
+   and rendered README/UI verification.
+
+No final release acceptance or OBS Forum listing is claimed by this entry.

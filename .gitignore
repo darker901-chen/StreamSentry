@@ -18,6 +18,7 @@
 
 # Project governance and workflow files (this project)
 !CLAUDE.md
+!AGENTS.md
 !SPEC.md
 !ARCHITECTURE.md
 !SETUP.md

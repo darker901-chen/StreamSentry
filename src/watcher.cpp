@@ -375,9 +375,10 @@ BOOL CALLBACK enum_proc(HWND hwnd, LPARAM lp)
 	}
 
 	if (ctx->allowlist_mode) {
-		/* Allowlist mode (M7, SPEC 2.3): every visible window that is
-		 * NOT approved gets a plate. No implicit approvals — shell
-		 * surfaces (taskbar, wallpaper) mask like any other window.
+		/* Allowlist mode (M7, SPEC 2.3): every visible content-bearing
+		 * window that is NOT approved gets a plate. The deterministic
+		 * sliver/wallpaper exclusions above are owner-ruled non-content;
+		 * the taskbar and real application windows are not exempt.
 		 * Toast cards above are exempt from this check by design:
 		 * approving a process never exempts its toasts. */
 		if (!matches_list(*ctx->allowlist, proc, title_l))
@@ -743,9 +744,9 @@ void ss_watcher_set_allowlist(const char *multiline_utf8)
 {
 	std::vector<std::wstring> parsed = parse_multiline_utf8(multiline_utf8);
 	std::lock_guard<std::mutex> lk(g_cfg_mutex);
-	/* Deliberately NO default fallback: an empty allowlist approves
-	 * nothing (mask everything) — that is the mode's default-deny
-	 * promise (SPEC 2.3). */
+	/* Deliberately NO default fallback: an empty allowlist approves no
+	 * content-bearing window. Deterministic non-content exclusions still
+	 * apply; this is the mode's default-deny promise (SPEC 2.3). */
 	g_allowlist = std::move(parsed);
 }
 

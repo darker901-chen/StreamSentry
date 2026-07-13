@@ -132,8 +132,8 @@ marking, not in any list). Structural fix: invert the default.
 - **Mode switch** in filter settings: `Blocklist (mask listed
   windows)` — the v0.1 behavior, remains the default on upgrade — vs
   `Allowlist (mask everything except listed)`.
-- Allowlist semantics: every visible, non-cloaked top-level window
-  that does **not** match the allowlist is reported as a
+- Allowlist semantics: every visible, non-cloaked, content-bearing top-level
+  window that does **not** match the allowlist is reported as a
   `SS_RECT_WINDOW` mask rect. Match semantics identical to the
   blocklist (case-insensitive substring vs process image name OR
   window title — owner ruling a434b18 applies to both lists).
@@ -142,10 +142,12 @@ marking, not in any list). Structural fix: invert the default.
   exempt its toasts: toast rects keep their own kind and card. A
   window matching the allowlist is exempt only from the
   default-mask-everything rule.
-- No implicit approvals: shell surfaces (taskbar, desktop) are windows
-  like any other and start masked. First-run consequence (taskbar
-  plated until approved) is acceptable default-deny; the M8 picker
-  makes approving them one click.
+- No implicit process/title approvals: the taskbar and application windows
+  start masked. Per owner ruling 2026-07-13, deterministic known-non-content
+  windows are excluded before matching: windows ≤16px wide or tall, plus
+  `Progman`/`WorkerW` desktop wallpaper hosts. An empty allowlist therefore
+  approves no content-bearing window, while the wallpaper remains visible.
+  The M8 picker makes approving the taskbar or an application one click.
 - **Rect-budget overflow**: if maskable windows exceed `SS_MAX_RECTS`,
   the watcher publishes a `mask_all` flag in the snapshot; the render
   side then draws one full-source **privacy plate** (opaque, lock +

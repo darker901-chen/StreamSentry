@@ -99,6 +99,12 @@ detection (CLOAK_UNKNOWN excluded from the UI list), plain
 deduplicated by process name. It feeds the picker combo in filter.c;
 detection is untouched.
 
+M8.1/M8.2 add two mode-agnostic, deterministic non-content exclusions before
+matching: windows ≤16px wide or tall (resize/drop-shadow slivers) and desktop
+wallpaper hosts with class `Progman` or `WorkerW`. The taskbar and real
+application windows remain subject to block/allowlist matching. This is the
+final owner ruling in `reports/RULING-2026-07-13-noncontent-window-exclusions.md`.
+
 ## Data flow (one healthy frame)
 
 ```
@@ -269,7 +275,10 @@ not include dllimport-decorated OBS headers.
 
 Every milestone in this repo is produced by a hub-and-spoke agent
 workflow (owner ruling 2026-07-09: document it here); the spokes talk
-to each other only through files in `reports/`:
+to each other only through files in `reports/`. Claude Code uses the
+definitions in `.claude/agents/`; Codex follows the equivalent sequential
+workflow required by `AGENTS.md` and the personal StreamSentry Release
+Guardian plugin:
 
 | Role | Writes | Job |
 |---|---|---|

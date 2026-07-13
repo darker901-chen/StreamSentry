@@ -33,13 +33,13 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.example.streamsentry"
+            "bundleId": "com.darker901chen.streamsentry"
         }
     },
     "name": "streamsentry",
     "displayName": "StreamSentry",
     "version": "0.2.0",
     "author": "darker",
-    "website": "https://example.com",
+    "website": "https://github.com/darker901-chen/StreamSentry",
     "email": "hahaha901@gmail.com"
 }

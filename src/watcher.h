@@ -48,8 +48,9 @@ void ss_watcher_set_blocklist(const char *multiline_utf8);
 void ss_watcher_set_mode_allowlist(bool allowlist);
 
 /* Replace the allowlist (same format/matching as the blocklist). NULL
- * or empty clears to EMPTY — an empty allowlist masks everything;
- * there are no built-in approvals (SPEC 2.3). Thread-safe. */
+ * or empty clears to EMPTY — no content-bearing window is approved;
+ * deterministic non-content exclusions still apply and there are no
+ * built-in approvals (SPEC 2.3). Thread-safe. */
 void ss_watcher_set_allowlist(const char *multiline_utf8);
 
 /* The built-in default blocklist as newline-separated UTF-8 text, for

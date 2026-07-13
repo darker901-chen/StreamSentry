@@ -1,4 +1,4 @@
-# CLAUDE.md — Project Constraints
+# AGENTS.md — Project Constraints
 
 ## What this is
 A Windows OBS Studio video filter plugin — a **privacy assist for screen capture** (owner repositioning 2026-07-09: assist, not insurance). It deterministically masks the three classic on-stream accidents: (1) notification toasts popping up with private message content, (2) accidentally exposed sensitive windows (blocklist; v0.2 adds an inverted **allowlist mode** — mask everything except approved windows — plus a panic hotkey), (3) password managers / system credential dialogs, plus password-field focus as a secondary guard. Detection is OS-level (window enumeration + UI Automation). When protection cannot be verified, the output keeps rendering and the user is clearly told the guard is inactive — the plugin never disrupts the stream.
@@ -22,4 +22,5 @@ A Windows OBS Studio video filter plugin — a **privacy assist for screen captu
 - OBS 30+ APIs only; when unsure about an API, consult official OBS docs/headers in-repo rather than guessing.
 - Every feature lands with a manual test note appended to TESTING.md.
 - For implementation milestones and release preparation, use a sequential hub-and-spoke gate: the hub alone edits source; a verifier builds/tests and writes `reports/verify-NNN.md`; a spec-guardian audits the same diff and writes `reports/spec-review-NNN.md`; only after VERIFIED + PASS may a scribe update TESTING.md and CHANGELOG.md. A post-gate change invalidates the prior gate.
+- Review agents share the workspace, so enforce their write boundaries by instruction and confirm them with `git diff`. Never run the three gates in parallel because each consumes the previous gate's evidence.
 - Never push, publish, or submit externally without explicit owner authorization.
