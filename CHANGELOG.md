@@ -7,7 +7,92 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Two unreleased sets live here, newest first: the v0.2 development cycle
 (M5 onward) and, below it, the 0.1.0 release-candidate set (M0 through M4).
-Nothing has been pushed or tagged; publishing is a human step.
+Private `origin/master` already contains commit `7adcf43`; the
+publication-readiness documentation and gate reports below are still local.
+No v0.2 tag has been created, the repository has not been made public, and no
+GitHub prerelease has been published. Those remain separately authorized human
+steps.
+
+### Publication-readiness installation and publishing SOP - 2026-07-15
+
+The current shipping candidate passed the authoritative
+`reports/verify-008.md` (**VERIFIED**) and `reports/spec-review-007.md`
+(**PASS**) gates under
+`reports/RULING-2026-07-15-remove-panic-hotkey.md`. The experimental panic
+hotkey was test-only scaffolding and is removed before beta publication. The
+shipping v0.2 scope therefore contains four approved additions: watcher
+performance hardening, toast geometry narrowing, Allowlist mode, and the
+window picker. Allowlist's deterministic full-source default-deny fallback is
+unchanged.
+
+#### Changed
+
+- StreamSentry now registers no shipping hotkey, retains no panic toggle or
+  state, and ships no related locale entry or current user workflow. Historical
+  M7 and older gate evidence remains unchanged as a record of prior
+  fingerprints.
+- The installation guidance identifies the actual
+  `streamsentry-0.2.0-windows-x64.zip` Release asset, exact two-file layout,
+  nested-folder and duplicate-copy checks, successful-load log, unsigned-beta
+  warning, shipped UI labels, two-minute Blocklist picker/add/remove masking
+  smoke test, update, uninstall, and issue-report steps. The recommended
+  install copies the archive root to
+  `%ProgramData%\obs-studio\plugins\streamsentry`; custom/portable OBS uses the
+  traditional split DLL/data layout.
+- The publishing SOP now keeps candidate freeze, sequential verifier and spec
+  review, exact-package acceptance, one scribe update, commit/push, tag/draft,
+  download-back, visibility, publication, and anonymous checks in one explicit
+  order. Commit, push, tag push, visibility, and publication remain separate
+  owner-authorized actions.
+- Failed gate history is retained: `verify-005` caught an impossible
+  tag-run-format requirement and a scribe/manual-acceptance ordering conflict;
+  after those repairs `spec-review-005` caught unqualified fail-open wording
+  that omitted Allowlist's full-source mask-all fallback. The final docs now
+  state Blocklist source-plus-chip and Allowlist full-source-plate-plus-chip
+  behavior consistently. The later owner ruling and final gate remove only the
+  experimental user control, not the Allowlist fallback.
+
+#### Verification
+
+- A clean Windows x64 Release build with warnings-as-errors passed with zero
+  StreamSentry warnings/errors. CTest passed 4/4; all four suites and
+  `watcher-selftest` also passed directly. The real-toast leg remained
+  inconclusive because Windows displayed no banner.
+- The clean install tree and ZIP contain exactly
+  `streamsentry/bin/64bit/streamsentry.dll` (76,288 bytes, SHA-256
+  `A9DA896362379153953EBF05D454504956FF776A57EA512A7A57B402B315FB2D`)
+  and `streamsentry/data/locale/en-US.ini` (1,377 bytes, SHA-256
+  `51A1CF65EF10BAE9EC9DB41A2955DB9724719F67254B5D5617B2EEAE05835D75`),
+  with no PDB or extra file. The DLL is version 0.2.0 and unsigned. The final
+  local ZIP SHA-256 is
+  `5D1E7D8779899C9B21B46E0B6946F82504EF14FFA232174E47B4A8CA26710018`.
+- All 22 current local Markdown links and anchors resolved, and the quick
+  install, full installation SOP, publishing SOP, package, locale labels, and
+  GitHub workflow agree for the verified fingerprint.
+- Live exact-package smoke testing passed on OBS 32.1.2. The ZIP's exact DLL
+  was installed at
+  `C:\ProgramData\obs-studio\plugins\streamsentry\bin\64bit\streamsentry.dll`;
+  the running `obs64.exe` loaded that module with the verified hash and version.
+  OBS Settings > Hotkeys returned zero results for StreamSentry, and the active
+  profile contains no `streamsentry.panic` binding. Selecting `notepad.exe`
+  through the Blocklist picker produced an opaque plate (`mask plates active:
+  1`); removing it returned the log to `mask plates active: 0`. The original
+  Allowlist scene semantics were restored afterward. Evidence is in
+  `C:\Users\darker\AppData\Roaming\obs-studio\logs\2026-07-15 23-15-02.txt`
+  and the external screenshot
+  `C:\Users\darker\.codex\visualizations\2026\07\15\019f65e4-26b1-7fb3-a2b0-18cc82b3bc50\obs-final-no-panic-mask-smoke.png`.
+
+#### Pending owner acceptance
+
+- Real-notification toast timing; degraded-mode recovery; taskbar and
+  wallpaper/sliver behavior; mixed-DPI/multi-monitor placement; 30-minute SRT
+  soak and watcher p99; two-hour idle memory; 60 fps impact; and fresh-machine
+  unsigned Windows UX remain open.
+- Tag/Actions/draft creation, draft ZIP download-back and OBS retest,
+  public-history/privacy acceptance, repository visibility, anonymous
+  download/Issues checks, and prerelease publication also remain open.
+- No v0.2 tag, GitHub Release, new push, public visibility change, or public
+  publication is claimed by this entry.
 
 ### Release preparation audit - 2026-07-14
 

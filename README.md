@@ -3,8 +3,9 @@
 **A privacy assist for screen capture.** A Windows OBS Studio video
 filter that deterministically masks the classic on-stream privacy
 accidents *before* they reach your capture — and clearly tells you
-(with an on-output status chip) whenever it cannot verify it is
-protecting you. It never interrupts your stream.
+(with an on-output status chip) whenever it cannot verify protection.
+Blocklist mode keeps the source rendering on those failures; allowlist mode
+uses the full-source opaque fallback that its default-deny design promises.
 
 > Status: **v0.2.0 beta.** Machine-verified (4 unit-test suites +
 > live watcher self-test, every milestone gated by a separate build-verifier
@@ -39,15 +40,15 @@ to an explicit OS-level rule. Development authorship is disclosed below.
 **Masks only when confident — and says so when it isn't.** A single
 watcher thread owns detection and updates a heartbeat every tick. Masks
 are drawn only when both the detection and the coordinate mapping are
-confident; StreamSentry never guesses a mask position and never
-disrupts your output. If the heartbeat goes stale (>500 ms), the
-watcher dies, or the capture geometry can't be resolved, your stream
-keeps rendering normally and a small opaque **"protection degraded"
-chip** appears on the output (plus an OBS log line) until protection
-verifies again. The chip **cannot be turned off** — you always know
-when you are unprotected. (Design decision 2026-07-09: a wrong or
-disruptive mask is worse than a missed one; this replaced the v0.1
-full-blackout behavior.)
+confident; StreamSentry never guesses a mask position. If the heartbeat
+goes stale (>500 ms), the watcher dies, or the capture geometry cannot be
+resolved, a small opaque **"protection degraded" chip** appears on the
+output (plus an OBS log line) until protection verifies again. In
+**Blocklist** mode the source keeps rendering normally; in **Allowlist** mode
+the entire source becomes an opaque privacy plate because that mode is
+explicitly default-deny. The chip **cannot be turned off**. (Design decision
+2026-07-09: a wrong or disruptive guessed mask is worse than a missed one;
+allowlist's mask-all fallback is the deliberate mode exception.)
 
 **Opaque, never blur.** Masks are solid, opaque plates — a notification
 card for toasts, a dark privacy plate (lock icon) for windows and password
@@ -61,24 +62,37 @@ tools. Opaque is the only honest guarantee.
 - OBS Studio 32.1.2 (verified). Older OBS releases may work but are not part
   of the current compatibility evidence.
 
-## Install
+## Install — standard OBS setup (about 60 seconds)
 
-1. Download `streamsentry-0.2.0-windows-x64.zip` from the
-   [Releases page](https://github.com/darker901-chen/StreamSentry/releases).
-   If possible, compare its SHA-256 value with the checksum printed in that
-   release's notes.
-   It contains one folder, `streamsentry\`, laid out as a self-contained
-   OBS plugin (`bin\64bit\streamsentry.dll` + `data\locale\...`).
-2. Close OBS. Extract the `streamsentry` folder into
-   `%ProgramData%\obs-studio\plugins\` so the final DLL path is exactly
-   `%ProgramData%\obs-studio\plugins\streamsentry\bin\64bit\streamsentry.dll`.
-   Windows may request administrator approval. Avoid an accidental nested
-   `streamsentry\streamsentry\...` folder.
-3. Start OBS. Add or select a **Display Capture**, open **Filters**, and
-   confirm **StreamSentry** appears under **Effect Filters**.
-4. For log confirmation, use **Help → Log Files → View Current Log** or open
-   `%APPDATA%\obs-studio\logs`; look for
-   `[streamsentry] plugin loaded successfully (version 0.2.0)`.
+1. On the [Releases page](https://github.com/darker901-chen/StreamSentry/releases),
+   open the latest **0.2.0 beta** release and download
+   `streamsentry-0.2.0-windows-x64.zip`. Do not download GitHub's automatic
+   **Source code** archives; they do not contain the ready-to-use plugin DLL.
+2. Close OBS completely.
+3. Press **Win+R**, paste `%ProgramData%\obs-studio\plugins`, and press Enter.
+   Create the `plugins` folder if Windows says it does not exist.
+4. Open the downloaded zip and copy its `streamsentry` folder into that
+   `plugins` folder. The final DLL path must be exactly:
+
+   ```text
+   C:\ProgramData\obs-studio\plugins\streamsentry\bin\64bit\streamsentry.dll
+   ```
+
+   If you see `streamsentry\streamsentry\bin`, move the inner folder up one
+   level.
+5. Start OBS. Add or select an unscaled full-monitor **Display Capture**,
+   right-click it → **Filters** → under **Effect Filters** press **+** →
+   **StreamSentry**.
+
+For a custom-location or portable OBS installation, or if the filter does not
+appear, use the exact-path checks in the
+[full installation SOP](docs/INSTALLATION.md). It also includes checksum
+verification, a two-minute masking smoke test, update, uninstall, and log-based
+troubleshooting.
+
+For log confirmation, use **Help → Log Files → View Current Log** or open
+`%APPDATA%\obs-studio\logs`; look for
+`[streamsentry] plugin loaded successfully (version 0.2.0)`.
 
 The beta DLL is unsigned. Windows or security software may warn about the
 download; verify the published checksum and do not bypass a warning if the
@@ -90,15 +104,18 @@ Close OBS, delete `%ProgramData%\obs-studio\plugins\streamsentry\`, then
 start OBS again. Existing scenes may retain an unavailable-filter entry until
 you remove that filter from the source.
 
-### Install troubleshooting
+### Quick install troubleshooting
 
-- If StreamSentry is missing, confirm the exact DLL path from step 2 and check
+- If StreamSentry is missing, confirm the exact DLL path from step 4 and check
   the current OBS log for `streamsentry` or a module-load error.
 - The beta is Windows x64 only; Windows on Arm and 32-bit builds are unsupported.
 - `Failed to load 'zh-TW' text` followed by the successful-load line means OBS
   fell back to the bundled English locale; it is not a plugin-load failure.
-- Installing directly into the OBS application directory is a legacy layout
-  that OBS says will stop working in a future version, so it is not recommended.
+- Custom-location and portable OBS installs may need their own plugin paths;
+  follow the full installation SOP instead of guessing or nesting folders.
+- Installing directly into a standard OBS application directory is a legacy
+  layout that OBS says will stop working in a future version, so it is not the
+  recommended default.
 
 ## Usage
 
@@ -129,12 +146,6 @@ you remove that filter from the source.
      Duplicates are not added twice.
    - There is deliberately **no** option to disable the "protection
      degraded" status chip.
-4. **Panic hotkey** (v0.2): bind "StreamSentry: mask everything
-   (panic)" under OBS **Settings → Hotkeys**. Press once → the entire
-   source is replaced by an opaque privacy plate on the next frame;
-   press again → back to normal. Not persisted: a fresh OBS session
-   always starts un-panicked.
-
 Toast masking and password-field masking are always on while the filter
 is enabled, in both modes — approving a process in the allowlist does
 NOT exempt its notification toasts.
@@ -145,10 +156,11 @@ StreamSentry is honest about what it does not do. As of v0.2:
 
 - **Masking works on unscaled full-monitor Display Capture.** A
   **Window Capture**, a scaled/cropped capture, or two monitors of
-  *identical resolution* cannot be mapped with certainty — those
-  sources render normally, and while something needs masking the
-  "protection degraded" chip shows instead (StreamSentry never guesses
-  a mask position).
+  *identical resolution* cannot be mapped with certainty. In Blocklist mode
+  those sources render normally with the "protection degraded" chip; in
+  Allowlist mode they fall to a full-source opaque privacy plate plus the chip
+  because allowlist is default-deny. StreamSentry never guesses a mask
+  position.
 - **Toast matching is geometry-narrowed.** On Windows 11 the toast host
   window class is shared with other XAML popups (Start-menu search,
   taskbar flyouts); a geometry gate (right-edge band + size bounds)
@@ -217,8 +229,15 @@ Pure-logic modules (coordinate mapping, plate generation) have unit tests:
 
 ## Documentation guide
 
-**Using the plugin?** This README and [CHANGELOG.md](CHANGELOG.md) are
-all you need (plus [LICENSE](LICENSE)).
+**Using the plugin?** Start with the
+[installation and first-run SOP](docs/INSTALLATION.md), then use this README as
+the feature and limitations reference. Release changes are in
+[CHANGELOG.md](CHANGELOG.md).
+
+**Publishing a beta?** Follow the maintainer-only
+[GitHub publishing SOP](docs/PUBLISHING_SOP.md). It keeps verification, the
+downloadable artifact, repository visibility, and the public Release in the
+required order.
 
 **Reading or modifying the code?** Start with
 [ARCHITECTURE.md](ARCHITECTURE.md) (how it is actually built, including

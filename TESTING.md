@@ -1333,3 +1333,143 @@ external listing, the owner still needs to record all of the following:
    and rendered README/UI verification.
 
 No final release acceptance or OBS Forum listing is claimed by this entry.
+
+## Publication readiness - 2026-07-15 - installation and GitHub SOP gate
+
+### Gate history and authoritative result
+
+This documentation-only publication-readiness pass adds the README quick
+install, `docs/INSTALLATION.md`, and `docs/PUBLISHING_SOP.md`. It preserves the
+failed rounds because they caught user-visible release-process defects:
+
+1. `reports/verify-005.md` (**FAILED**) accepted the build, tests, package,
+   installation instructions, and links, but caught two publishing-SOP
+   blockers: a tag run could not show the format job as green because that job
+   is intentionally skipped for tags, and the scribe was ordered before the
+   exact-package manual acceptance it was supposed to record.
+2. `reports/verify-006.md` (**VERIFIED**) confirmed those two process repairs.
+   `reports/spec-review-005.md` then **FAIL**ed the candidate because public
+   unverified-capture wording described only Blocklist fail-open behavior and
+   omitted Allowlist's binding full-source opaque mask-all fallback.
+3. The hub repaired every affected README/installation entry point, producing
+   the superseded `reports/verify-007.md` (**VERIFIED**) plus
+   `reports/spec-review-006.md` (**PASS**) documentation gate.
+4. The owner then ruled in
+   `reports/RULING-2026-07-15-remove-panic-hotkey.md` that the panic hotkey was
+   experimental test scaffolding rather than a shipping requirement. The
+   current candidate removes its registration, state, locale entry, and user
+   workflow while preserving Allowlist's deterministic full-source default-deny
+   fallback. Historical M7 text and older reports remain unchanged.
+5. The authoritative shipping pair is now `reports/verify-008.md`
+   (**VERIFIED**) plus `reports/spec-review-007.md` (**PASS**). The v0.2 beta
+   has four approved additions: watcher performance hardening, toast geometry
+   narrowing, Allowlist mode, and the window picker. Blocklist unverified
+   states keep the source and add the opaque degradation chip; Allowlist
+   unverified states replace the source with the full opaque privacy plate and
+   add the chip.
+
+### Verified documentation and machine evidence
+
+- The README offers a roughly 60-second standard install. The detailed SOP
+  names the real `streamsentry-0.2.0-windows-x64.zip` asset, rejects GitHub's
+  automatic source archives, explains checksum and unsigned-beta handling,
+  and copies the single `streamsentry` root to the supported standard path:
+  `%ProgramData%\obs-studio\plugins\streamsentry`.
+- The expected standard paths are
+  `C:\ProgramData\obs-studio\plugins\streamsentry\bin\64bit\streamsentry.dll`
+  and
+  `C:\ProgramData\obs-studio\plugins\streamsentry\data\locale\en-US.ini`.
+  The SOP also covers the traditional split layout for custom/portable OBS,
+  duplicate versions, update, uninstall, load-log checks, troubleshooting, and
+  a two-minute first-run Blocklist picker/add/remove masking smoke test using
+  shipped labels.
+- The maintainer SOP covers public-history/privacy review, one frozen
+  candidate, verifier -> spec guardian -> exact-package acceptance -> one
+  scribe update, and separately authorized commit/push, beta tag/draft,
+  download-back, public visibility, prerelease publication, anonymous checks,
+  and rollback. `0.2.0-beta1` and the Windows ZIP agree with the current
+  GitHub Actions workflow; format evidence belongs to the preceding exact
+  `master` commit because the tag run intentionally skips that job.
+- The final verifier performed a clean Windows x64 Release build with
+  warnings-as-errors: zero StreamSentry warnings and errors. CTest passed 4/4
+  in 0.19 seconds; coord-map, plate-gen, toast-gate, frame-decide, and
+  watcher-selftest each passed directly. The watcher test covered heartbeat,
+  blocklist appearance/disappearance, named deduplicated picker enumeration,
+  allowlist masking, mode restoration, debug-kill degradation/recovery, and
+  cleanup. The real-toast leg remained **INCONCLUSIVE** because no Windows
+  banner appeared.
+- The clean install tree and final local ZIP contain exactly one root and two
+  files, with no PDB or extra content:
+
+  ```text
+  streamsentry/bin/64bit/streamsentry.dll  76288 bytes
+  streamsentry/data/locale/en-US.ini        1377 bytes
+  ```
+
+  The installed DLL is byte-identical to the build, reports version 0.2.0, is
+  unsigned, and has SHA-256
+  `A9DA896362379153953EBF05D454504956FF776A57EA512A7A57B402B315FB2D`.
+  The locale SHA-256 is
+  `51A1CF65EF10BAE9EC9DB41A2955DB9724719F67254B5D5617B2EEAE05835D75`.
+  The exact final local ZIP
+  `release/streamsentry-0.2.0-windows-x64.zip` has SHA-256
+  `5D1E7D8779899C9B21B46E0B6946F82504EF14FFA232174E47B4A8CA26710018`.
+- The final gate checked all 58 Markdown files and resolved all 22 local links
+  and anchors. Package paths, locale/UI labels, README, installation SOP,
+  publishing SOP, and workflow agree for the exact verified fingerprint.
+
+### Exact-package acceptance - STATUS: PASS
+
+The exact final ZIP passed the current non-panic smoke test on OBS 32.1.2:
+
+- Its DLL was installed at
+  `C:\ProgramData\obs-studio\plugins\streamsentry\bin\64bit\streamsentry.dll`.
+  The running `obs64.exe` loaded that exact module, hash, and version 0.2.0.
+- OBS **Settings > Hotkeys**, searched for `StreamSentry`, returned zero
+  results. The active profile contains no `streamsentry.panic` binding.
+- In the StreamSentry filter, the Blocklist picker selected `notepad.exe` and
+  produced an opaque plate. The log transitioned to `mask plates active: 1`;
+  removing the entry returned it to `mask plates active: 0`.
+- The original Allowlist scene semantics were restored after the smoke test.
+
+Evidence log:
+`C:\Users\darker\AppData\Roaming\obs-studio\logs\2026-07-15 23-15-02.txt`.
+Screenshot outside the repository:
+`C:\Users\darker\.codex\visualizations\2026\07\15\019f65e4-26b1-7fb3-a2b0-18cc82b3bc50\obs-final-no-panic-mask-smoke.png`.
+
+This proves that the exact local package loads, exposes no StreamSentry hotkey,
+and performs the documented Blocklist picker/add/remove opaque-mask workflow on
+this OBS installation. It does not close the broader manual matrix below.
+
+### Remaining owner-manual and publication acceptance - STATUS: PENDING
+
+The remaining open manual checks are:
+
+1. Verify a real Windows notification toast is masked before content is
+   readable, including
+   current signature/geometry/timing and the Allowlist toast exception. This
+   remains blocked while the development machine suppresses banners.
+2. Exercise real in-OBS Blocklist source-plus-chip and Allowlist
+   full-source-plate-plus-chip degraded behavior and recovery, plus taskbar
+   masking and the <=16 px sliver and `Progman` / `WorkerW` exclusions.
+3. Verify supported full-monitor Display Capture placement across mixed-DPI
+   and multi-monitor cases, including the open transform/manual-matrix rows.
+4. Complete the 30-minute busy SRT soak with zero stale-heartbeat degraded
+   events and watcher tick p99 below 50 ms; the two-hour idle memory/working-set
+   check; and the 60 fps render-impact/frame-drop measurement.
+5. On a fresh Windows x64 machine, verify the unsigned Windows security-warning
+   UX, installation, versioned load log, and uninstall behavior.
+6. After explicit authorization for tag push, confirm Actions creates the
+   draft prerelease, download its ZIP back, verify checksum and exact two-file
+   no-PDB layout, install that downloaded asset, and repeat the two-minute OBS
+   smoke test.
+7. Accept the complete public history/private-data exposure, then separately
+   authorize repository visibility and Release publication. Finally verify
+   signed out that the repository, README, LICENSE, Actions, Issues, prerelease,
+   checksum, and Windows ZIP download all work without authentication.
+
+Private `origin/master` already contains `7adcf43`; this documentation
+candidate is still local. No v0.2 tag, GitHub Release, new push, public
+visibility change, or public prerelease publication is claimed. The exact local
+smoke passed, but the remaining manual and external publication checks above
+mean this entry is not final release acceptance.

@@ -28,6 +28,7 @@
 !/scripts
 !/reports
 !/tests
+!/docs
 
 # Exclude lock files
 *.lock.json

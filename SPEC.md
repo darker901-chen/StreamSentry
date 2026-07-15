@@ -68,7 +68,8 @@ macOS; blur/mosaic; per-app policies; **allowlist mode** (only-approved-apps-vis
 # Part 2 — v0.2 additions (approved 2026-07-05)
 
 Driven by owner field-testing of v0.1 (findings in
-reports/V02-PLAN.md). Five items, mapped to milestones M6–M8, plus the
+reports/V02-PLAN.md). Four shipping items, mapped to milestones M6–M8,
+plus the experimental panic hotkey removed by owner ruling on 2026-07-15 and the
 §2.7 repositioning ruled mid-v0.2. Iron rules apply as amended
 2026-07-09: never disrupt the output, mask only on confidence (§2.7),
 and drawn masks stay opaque-only.
@@ -163,24 +164,12 @@ marking, not in any list). Structural fix: invert the default.
   (inverted meaning would be a security bug). Allowlist default:
   empty.
 
-## 2.4 Panic hotkey (M7)
+## 2.4 Panic hotkey — removed before beta publication
 
-- One OBS hotkey per filter instance (registered via
-  `obs_hotkey_register_source`, configured in OBS Settings → Hotkeys;
-  no properties-UI element): **"StreamSentry: mask everything
-  (panic)"**, toggle semantics.
-- Engaged → render a full-source **privacy plate** (opaque, lock +
-  "Hidden") instead of the target; released → normal pipeline. A
-  deliberate user action outranks health state (§2.7): if protection
-  is simultaneously unverified, the panic plate stays and the status
-  chip is drawn on top of it, so the streamer still learns the guard
-  is inactive.
-- Not persisted across OBS sessions: a fresh session starts with panic
-  released (a forgotten invisible global mask across sessions
-  surprises the user).
-- Acceptance: hotkey engages within one frame (mask visible on the
-  very next rendered frame), toggles cleanly, works in both modes, and
-  stays engaged during injected watcher death (chip on top).
+The panic hotkey was experimental test scaffolding, not a shipping user
+requirement. Owner ruling 2026-07-15 removed it from v0.2. The release DLL must
+not register a StreamSentry hotkey, retain panic state, or advertise a panic
+workflow. Allowlist mode's deterministic mask-all behavior remains unchanged.
 
 ## 2.5 Window-picker UI (M8)
 
@@ -270,6 +259,4 @@ localization; OBS < 30; window/game-capture geometry support.
 | Allowlist mode, > `SS_MAX_RECTS` unapproved windows | Single full-source privacy plate (not black) |
 | Allowlist mode, watcher killed (fault injection) | Full-source mask-all plate ≤ 500ms (§2.7: the mode's own default, not black) |
 | Mode switch round-trip | Blocklist and allowlist contents both survive untouched |
-| Panic hotkey pressed / released | Full-source plate next frame / normal render resumes |
-| Panic + watcher killed | Panic plate stays (deliberate user action outranks health state); status chip on top |
 | Picker: add open window, no typing | Entry appended to active list; mask behavior updates |

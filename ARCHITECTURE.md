@@ -21,7 +21,7 @@ implementation satisfies them.
 | [src/plate-gen.c](src/plate-gen.c) / .h | Pure C, no OBS, no Windows | CPU generator for mask visuals (RGBA8888): toast card, privacy plate, failure status chip. Opacity (iron rule 3) is a *tested property*: `ss_image_opaque_inside()` + `ss_plate_max_corner_inset()` let unit tests prove every pixel inside the corner inset is alpha-255. |
 | [src/toast-gate.c](src/toast-gate.c) / .h (M6) | Pure C, no OBS, no Windows | Toast geometry gate (SPEC 2.2): right-edge spawn band + generous size envelope, evaluated per monitor. Applied *after* the process+class signature; only removes toast-card over-masking. M6.5: uncertainty (no monitors, degenerate input) classifies as NOT a toast — mask only on confidence (SPEC 2.7). Constants are PROVISIONAL documented-metrics values (reports/M6-toast-probe.txt) pending on-machine calibration. |
 | [src/frame-decide.c](src/frame-decide.c) / .h (M6.5, M7) | Pure C, no OBS, no Windows | The per-frame masking decision (SPEC 2.7 ordering): health → mode-transition → degraded-flag → overflow → geometry → per-rect mapping; guarantees a degradation flag never drops a blocklist confident mask (guardian V6 regression is a unit test). M7: allowlist failure direction — ANY unverified state yields `mask_all` (the mode's default-deny, guardian Q1); blocklist overflow masks what it has + chip. filter.c only resolves geometry, calls this, and draws. |
-| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings (mode + both lists, M7), panic hotkey (M7, full-source plate instead of the target, not persisted), window-picker properties (M8: combo + refresh/add buttons appending to the ACTIVE list with case-insensitive dedupe), plate texture cache, DEGRADED-chip and mask-all rendering. |
+| [src/filter.c](src/filter.c) / filter.h | C, libobs | The OBS video filter: settings (mode + both lists, M7), window-picker properties (M8: combo + refresh/add buttons appending to the ACTIVE list with case-insensitive dedupe), plate texture cache, DEGRADED-chip and allowlist mask-all rendering. |
 | [src/plugin-main.c](src/plugin-main.c) | C, libobs | Module entry: `ss_state_init()` + `obs_register_source(&streamsentry_filter_info)`. |
 | src/plugin-support.c.in | template | obs-plugintemplate logging support (`obs_log`). |
 
@@ -123,7 +123,7 @@ EnumWindows pass:                                 enabled? target has size? else
   (proc names via PID cache, M6)                     INVALID -> UNVERIFIED (keep OK rects)
 UIA focus rect (if valid) appended                 (health/mode/degraded/overflow/geometry/
 snapshot.detection_degraded (M6.5)                  mapping order = pure frame-decide)
-snapshot.allowlist_mode + mask_all (M7)           panic or mask_all -> full-source plate
+snapshot.allowlist_mode + mask_all (M7)           mask_all -> full-source plate
 snapshot.heartbeat = os_gettime_ns()                INSTEAD of the target (M7)
 ss_state_publish(snapshot)                        else ALWAYS render target through chain,
 tick > 250ms -> LOG_WARNING (M6)                  draw plate per confidently mapped rect
@@ -199,13 +199,6 @@ fault-injection kill (`ss_watcher_debug_set_killed`, selftest-only)
 freezes publish *and* heartbeat exactly like a dead thread. DEGRADED
 engage/clear transitions are logged once each (no per-frame spam) with
 the heartbeat age in ms.
-
-Panic hotkey (M7, SPEC 2.4): a deliberate user action that outranks
-health state — while engaged, the full-source privacy plate is drawn
-INSTEAD of the target on every frame (the target is never composed),
-with the chip stacked on top whenever protection is simultaneously
-unverified. Toggled from the OBS hotkey thread via an atomic bool; not
-persisted across sessions; engage/release are logged.
 
 ## Render-side caching (why per-frame cost is flat)
 

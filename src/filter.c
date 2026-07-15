@@ -69,10 +69,6 @@ struct ss_filter {
 	bool enabled;
 	bool mode_allowlist; /* M7 (SPEC 2.3): failure direction + matching */
 
-	/* panic hotkey (M7, SPEC 2.4): toggled from the OBS hotkey thread,
-	 * read on the graphics thread; deliberately NOT persisted. */
-	volatile bool panic;
-	obs_hotkey_id panic_hotkey;
 	bool last_mask_all; /* transition logging */
 
 	/* last successfully read snapshot */
@@ -116,31 +112,11 @@ static void filter_update(void *data, obs_data_t *settings)
 	ss_watcher_set_allowlist(obs_data_get_string(settings, "allowlist"));
 }
 
-/* Panic hotkey (M7, SPEC 2.4): toggle. Deliberate user action; state
- * lives only in memory (fresh OBS session starts released). */
-static void panic_hotkey_cb(void *data, obs_hotkey_id id, obs_hotkey_t *hotkey, bool pressed)
-{
-	UNUSED_PARAMETER(id);
-	UNUSED_PARAMETER(hotkey);
-	struct ss_filter *f = data;
-	if (!pressed)
-		return;
-	bool now = !os_atomic_load_bool(&f->panic);
-	os_atomic_set_bool(&f->panic, now);
-	if (now)
-		obs_log(LOG_WARNING, "PANIC engaged by hotkey - masking the entire source%s",
-			f->enabled ? "" : " (filter currently disabled - takes effect when enabled)");
-	else
-		obs_log(LOG_INFO, "panic released by hotkey - normal pipeline resumed");
-}
-
 static void *filter_create(obs_data_t *settings, obs_source_t *source)
 {
 	struct ss_filter *f = bzalloc(sizeof(struct ss_filter));
 	f->source = source;
 	f->last_mode = SS_MODE_INIT;
-	f->panic_hotkey = obs_hotkey_register_source(source, "streamsentry.panic", obs_module_text("PanicHotkey"),
-						     panic_hotkey_cb, f);
 	ss_watcher_start();
 	filter_update(f, settings);
 	return f;
@@ -165,8 +141,6 @@ static void free_textures(struct ss_filter *f)
 static void filter_destroy(void *data)
 {
 	struct ss_filter *f = data;
-	if (f->panic_hotkey != OBS_INVALID_HOTKEY_ID)
-		obs_hotkey_unregister(f->panic_hotkey);
 	free_textures(f);
 	ss_watcher_stop();
 	bfree(f);
@@ -399,10 +373,9 @@ static gs_texture_t *get_plate_texture(struct ss_filter *f, enum ss_rect_kind ki
 	return tex;
 }
 
-/* Full-source privacy plate (M7): drawn INSTEAD of the target for the
- * panic hotkey (SPEC 2.4) and allowlist mask-all (SPEC 2.3). Solid
- * opaque fallback if the texture cannot be created — a full-cover mask
- * is never dropped (iron rule 3). */
+/* Full-source privacy plate (M7): drawn INSTEAD of the target for
+ * allowlist mask-all (SPEC 2.3). Solid opaque fallback if the texture
+ * cannot be created — a full-cover mask is never dropped (iron rule 3). */
 static void draw_full_plate(struct ss_filter *f, uint32_t w, uint32_t h)
 {
 	gs_texture_t *tex = get_plate_texture(f, SS_RECT_WINDOW, bucket_dim((double)w), bucket_dim((double)h));
@@ -518,12 +491,10 @@ static void filter_video_render(void *data, gs_effect_t *effect)
 	}
 #endif
 
-	/* Panic (SPEC 2.4) and mask-all (SPEC 2.3) draw a full-source
-	 * privacy plate INSTEAD of the target — the target is never
-	 * composed. Panic is a deliberate user action and outranks health
-	 * state; the chip still stacks on top when protection is
-	 * unverified, so the streamer keeps learning about failures. */
-	if (os_atomic_load_bool(&f->panic) || dec.mask_all) {
+	/* Allowlist mask-all (SPEC 2.3) draws a full-source privacy plate
+	 * INSTEAD of the target. The chip still stacks on top when protection
+	 * is unverified, so the streamer keeps learning about failures. */
+	if (dec.mask_all) {
 		draw_full_plate(f, w, h);
 		if (dec.unverified)
 			draw_status_chip(f, w, h);
