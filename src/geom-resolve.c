@@ -147,12 +147,14 @@ static BOOL CALLBACK window_match_proc(HWND hwnd, LPARAM lp)
 	char class_name[2048];
 	char executable[2048];
 
+	/* Title/class are cheap and usually reject every unrelated window. Only
+	 * open the owning process after those two exact fields match. */
 	if (!get_window_title_utf8(hwnd, title, sizeof(title)) ||
-	    !get_window_class_utf8(hwnd, class_name, sizeof(class_name)) ||
-	    !get_window_executable_utf8(hwnd, executable, sizeof(executable)))
+	    !get_window_class_utf8(hwnd, class_name, sizeof(class_name)))
 		return TRUE;
-
-	if (strcmp(title, ctx->title) != 0 || strcmp(class_name, ctx->class_name) != 0 ||
+	if (strcmp(title, ctx->title) != 0 || strcmp(class_name, ctx->class_name) != 0)
+		return TRUE;
+	if (!get_window_executable_utf8(hwnd, executable, sizeof(executable)) ||
 	    _stricmp(executable, ctx->executable) != 0)
 		return TRUE;
 
@@ -249,7 +251,7 @@ static bool resolve_window_capture(obs_source_t *target, uint32_t base_w, uint32
 	RECT rc;
 	if (get_client_screen_rect(hwnd, &rc))
 		add_unique_rect(candidates, &candidate_count, 3, &rc);
-	if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rc, sizeof(rc))))
+	if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &rc, (DWORD)sizeof(rc))))
 		add_unique_rect(candidates, &candidate_count, 3, &rc);
 	if (GetWindowRect(hwnd, &rc))
 		add_unique_rect(candidates, &candidate_count, 3, &rc);
